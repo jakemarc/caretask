@@ -1,0 +1,14 @@
+[Unit]
+Description=CareTask IDPH agency directory sync (one-shot)
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=jakemarc2
+WorkingDirectory=/home/jakemarc2/patient-api
+# PG* connection settings + FIREBASE_PROJECT_ID live in the API's
+# .env (mode 600 on the VM) — the same file the patient-api
+# service uses. Nothing secret is written in this unit.
+EnvironmentFile=/home/jakemarc2/patient-api/.env
+ExecStart=/usr/bin/node /home/jakemarc2/patient-api/sync-agencies.js --live

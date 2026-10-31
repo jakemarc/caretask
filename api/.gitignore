@@ -1,0 +1,8 @@
+# CareTask patient API — never commit secrets or build/runtime artifacts.
+# Added 2026-10-31 during the pre-push secrets audit for marcinnotech/CareTask.
+node_modules
+.env
+.env.local
+*.log
+dist
+coverage

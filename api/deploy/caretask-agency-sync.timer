@@ -1,0 +1,16 @@
+[Unit]
+Description=Weekly CareTask IDPH agency directory sync
+
+[Timer]
+# Mondays 03:00 VM local time (the VM clock is America/Chicago in
+# practice; systemd OnCalendar uses the machine's local timezone).
+# Weekly is plenty: the IDPH dataset updates irregularly, and the
+# sync skips cheaply when rowsUpdatedAt is unchanged — most runs
+# are a single metadata read.
+OnCalendar=Mon *-*-* 03:00:00
+# If the VM was off at 03:00, run the missed sync on next boot.
+Persistent=true
+Unit=caretask-agency-sync.service
+
+[Install]
+WantedBy=timers.target

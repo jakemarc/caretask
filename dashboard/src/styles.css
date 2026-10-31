@@ -1,0 +1,2781 @@
+:root {
+  --bg: #f3f5f7;
+  --panel: #ffffff;
+  --panel-2: #eef2f4;
+  --border: #e2e8f0;
+  --text: #17202a;
+  --muted: #64748b;
+  --teal: #0d9488;
+  --teal-deep: #0d9488;
+  --orange: #ea580c;
+  --steel: #64748b;
+  --green: #16a34a;
+  --amber: #d97706;
+  --red: #dc2626;
+  --shadow: 0 1px 3px rgba(16, 24, 40, 0.08), 0 1px 2px rgba(16, 24, 40, 0.04);
+  --banner-bg: #fef3c7;
+  --banner-border: #f59e0b;
+  --banner-text: #92400e;
+  --nav-active-bg: #e6f7f4;
+  --nav-active-text: #0d9488;
+  --badge-red-bg: #fef2f2;
+  --badge-amber-bg: #fffbeb;
+}
+
+[data-theme="dark"] {
+  --bg: #0a0d10;
+  --panel: #12171c;
+  --panel-2: #171e25;
+  --border: #232c35;
+  --text: #e6edf3;
+  --muted: #8b98a5;
+  --teal: #14b8a6;
+  --teal-deep: #0d9488;
+  --orange: #fd6828;
+  --steel: #7d9bb3;
+  --green: #34d399;
+  --amber: #fbbf24;
+  --red: #f87171;
+  --shadow: none;
+  --banner-bg: #2a1a08;
+  --banner-border: #7c4a12;
+  --banner-text: #fcd9a8;
+  --nav-active-bg: #171e25;
+  --nav-active-text: #e6edf3;
+  --badge-red-bg: #3d1212;
+  --badge-amber-bg: #33270a;
+}
+
+/* ---------- Color themes (Settings → Theme) ----------
+   A second, independent axis next to light/dark mode:
+   `data-color-theme` on <html> selects the accent palette, and
+   each palette below has a light variant and a dark variant
+   (the dark selector also requires data-theme="dark"), so every
+   theme works in both modes. ONLY accent-driven variables are
+   overridden here: --teal / --teal-deep (primary accent: links,
+   primary buttons, active tabs, avatars), --orange (secondary
+   accent), --steel (neutral accent), and the sidebar's
+   active-item tint. HARD RULE: --green / --amber / --red are
+   never redefined in this section — zone colors and the patient
+   status bar keep their clinical meaning in every theme. */
+
+/* Teal — the original look. These blocks repeat the :root and
+   [data-theme="dark"] values verbatim so every theme × mode
+   combination is complete; selecting Teal changes nothing. */
+:root[data-color-theme="teal"] {
+  --teal: #0d9488;
+  --teal-deep: #0d9488;
+  --orange: #ea580c;
+  --steel: #64748b;
+  --nav-active-bg: #e6f7f4;
+  --nav-active-text: #0d9488;
+}
+
+:root[data-color-theme="teal"][data-theme="dark"] {
+  --teal: #14b8a6;
+  --teal-deep: #0d9488;
+  --orange: #fd6828;
+  --steel: #7d9bb3;
+  --nav-active-bg: #171e25;
+  --nav-active-text: #e6edf3;
+}
+
+/* Ocean — blue family. */
+:root[data-color-theme="ocean"] {
+  --teal: #2563eb;
+  --teal-deep: #1d4ed8;
+  --orange: #0891b2;
+  --steel: #4f7396;
+  --nav-active-bg: #dbeafe;
+  --nav-active-text: #1d4ed8;
+}
+
+:root[data-color-theme="ocean"][data-theme="dark"] {
+  --teal: #60a5fa;
+  --teal-deep: #2563eb;
+  --orange: #0891b2;
+  --steel: #7d9bb3;
+  --nav-active-bg: #172a4a;
+  --nav-active-text: #93c5fd;
+}
+
+/* Forest — green family (accent only; the clinical zone/status
+   greens are the separate --green variable and do not move). */
+:root[data-color-theme="forest"] {
+  --teal: #15803d;
+  --teal-deep: #166534;
+  --orange: #65a30d;
+  --steel: #5f7161;
+  --nav-active-bg: #e3f2e6;
+  --nav-active-text: #166534;
+}
+
+:root[data-color-theme="forest"][data-theme="dark"] {
+  --teal: #4ade80;
+  --teal-deep: #15803d;
+  --orange: #65a30d;
+  --steel: #94a894;
+  --nav-active-bg: #14291c;
+  --nav-active-text: #86efac;
+}
+
+/* Sunset — orange/amber family (accent only; the clinical
+   amber is the separate --amber variable and does not move). */
+:root[data-color-theme="sunset"] {
+  --teal: #c2410c;
+  --teal-deep: #9a3412;
+  --orange: #be185d;
+  --steel: #8a6d5c;
+  --nav-active-bg: #ffedd5;
+  --nav-active-text: #9a3412;
+}
+
+:root[data-color-theme="sunset"][data-theme="dark"] {
+  --teal: #fb923c;
+  --teal-deep: #c2410c;
+  --orange: #ec4899;
+  --steel: #b8a090;
+  --nav-active-bg: #2e1a0e;
+  --nav-active-text: #fdba74;
+}
+
+/* Plum — purple family. */
+:root[data-color-theme="plum"] {
+  --teal: #7c3aed;
+  --teal-deep: #6d28d9;
+  --orange: #a21caf;
+  --steel: #6b6a8a;
+  --nav-active-bg: #ede9fe;
+  --nav-active-text: #6d28d9;
+}
+
+:root[data-color-theme="plum"][data-theme="dark"] {
+  --teal: #a78bfa;
+  --teal-deep: #7c3aed;
+  --orange: #d946ef;
+  --steel: #9a94b8;
+  --nav-active-bg: #241a3d;
+  --nav-active-text: #c4b5fd;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
+    Arial, sans-serif;
+  line-height: 1.5;
+}
+
+a {
+  color: var(--teal);
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+}
+
+input {
+  font: inherit;
+}
+
+/* ---------- Buttons ---------- */
+
+.btn {
+  display: inline-block;
+  text-align: center;
+  text-decoration: none;
+  border-radius: 8px;
+  padding: 10px 16px;
+  border: 1px solid transparent;
+  font-weight: 600;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: var(--teal-deep);
+  color: #fff;
+}
+
+.btn-secondary {
+  background: var(--panel-2);
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--muted);
+  border-color: var(--border);
+}
+
+/* ---------- Login ---------- */
+
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 440px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 32px;
+}
+
+.login-brand {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.brand-name {
+  margin: 0;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  font-size: 15px;
+}
+
+.brand-tag {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.login-card h1 {
+  margin: 0 0 4px;
+  font-size: 26px;
+}
+
+.login-sub {
+  margin: 0 0 20px;
+  color: var(--muted);
+}
+
+.login-card form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.login-card label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.login-card input {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 10px 12px;
+}
+
+.login-card input:disabled {
+  opacity: 0.5;
+}
+
+.login-error {
+  color: var(--red);
+  font-size: 14px;
+  margin: 0;
+}
+
+.setup-notice {
+  background: var(--banner-bg);
+  border: 1px solid var(--banner-border);
+  border-radius: 8px;
+  padding: 12px;
+  font-size: 14px;
+  margin: 0 0 20px;
+  color: var(--banner-text);
+}
+
+.setup-notice code {
+  color: var(--orange);
+}
+
+.login-toggle {
+  background: none;
+  border: none;
+  color: var(--teal);
+  margin-top: 16px;
+  padding: 0;
+}
+
+.login-footnote {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 20px 0 0;
+}
+
+/* ---------- App shell ---------- */
+
+.app-shell {
+  min-height: 100vh;
+}
+
+.app-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+  flex-wrap: wrap;
+}
+
+.header-left {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+
+.header-right {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.signed-in-as {
+  color: var(--muted);
+  font-size: 14px;
+  word-break: break-all;
+}
+
+.demo-banner {
+  background: var(--banner-bg);
+  border-bottom: 1px solid var(--banner-border);
+  padding: 10px 24px;
+  font-size: 14px;
+  color: var(--banner-text);
+}
+
+.app-main {
+  flex: 1;
+  min-width: 0;
+  padding: 24px 24px 48px;
+}
+
+.app-main h1 {
+  margin: 0 0 4px;
+  font-size: 28px;
+}
+
+.page-sub {
+  color: var(--muted);
+  margin: 0 0 24px;
+  max-width: 760px;
+}
+
+/* ---------- Tabs ---------- */
+
+.tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 12px;
+}
+
+.tab {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-weight: 600;
+}
+
+.tab.active {
+  background: var(--teal-deep);
+  border-color: var(--teal-deep);
+  color: #fff;
+}
+
+.tab-badge {
+  display: inline-block;
+  background: var(--orange);
+  color: #fff;
+  border-radius: 999px;
+  font-size: 12px;
+  padding: 1px 7px;
+  margin-left: 6px;
+}
+
+/* ---------- Registry ---------- */
+
+.filter-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.chip {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 5px 12px;
+}
+
+.chip.active {
+  background: var(--panel-2);
+  color: var(--text);
+  border-color: var(--steel);
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  font-size: 14px;
+}
+
+.data-table th,
+.data-table td {
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.data-table th {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 8px;
+}
+
+.dot-green {
+  background: var(--green);
+}
+
+.dot-amber {
+  background: var(--amber);
+}
+
+.dot-yellow {
+  background: var(--amber);
+}
+
+.dot-red {
+  background: var(--red);
+}
+
+.section-note {
+  color: var(--muted);
+  font-size: 14px;
+  max-width: 760px;
+}
+
+.zone-guide {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin: 16px 0;
+}
+
+.zone-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--muted);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.zone-card strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.zone-card p {
+  margin: 4px 0;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.zone-green {
+  border-left-color: var(--green);
+}
+
+.zone-yellow {
+  border-left-color: var(--amber);
+}
+
+.zone-red {
+  border-left-color: var(--red);
+}
+
+/* ---------- Cards ---------- */
+
+.card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px;
+}
+
+.card.priority-P1 {
+  border-left: 4px solid var(--red);
+}
+
+.card.priority-P2 {
+  border-left: 4px solid var(--amber);
+}
+
+.card.priority-P3 {
+  border-left: 4px solid var(--steel);
+}
+
+.card-top {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.card-meta {
+  color: var(--muted);
+  font-size: 14px;
+}
+.card-divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 10px 0;
+}
+
+/* Clinician card "Patients" expansion: a compact patients-table
+   (same classes as the Patient List table) inside the card. */
+.staff-patients {
+  margin-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.staff-patients .card-meta {
+  margin: 10px 0 2px;
+}
+.staff-patients .patients-table th,
+.staff-patients .patients-table td {
+  padding: 6px 6px;
+}
+
+.priority-badge,
+.kind-badge {
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.priority-P1 .priority-badge {
+  background: var(--badge-red-bg);
+  color: var(--red);
+}
+
+.priority-P2 .priority-badge {
+  background: var(--badge-amber-bg);
+  color: var(--amber);
+}
+
+.priority-P3 .priority-badge {
+  background: var(--panel-2);
+  color: var(--steel);
+}
+
+.kind-badge {
+  background: var(--panel-2);
+  color: var(--teal);
+}
+
+.card-note {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.flag-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+/* ---------- Analytics ---------- */
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.stat-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px;
+}
+
+.stat-value {
+  margin: 0;
+  font-size: 30px;
+  font-weight: 800;
+  color: var(--teal);
+}
+
+.stat-label {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.chart-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px;
+}
+
+.chart-card h2 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+
+.bar-chart {
+  width: 100%;
+  max-width: 560px;
+  height: auto;
+}
+
+@media (max-width: 720px) {
+  .data-table {
+    display: block;
+    overflow-x: auto;
+  }
+
+  .header-right {
+    width: 100%;
+  }
+}
+
+/* ---------- Dashboard shell: header + metrics row + sidebar ---------- */
+
+.metrics-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  padding: 16px 24px 0;
+}
+
+.metric-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+}
+
+.metric-title {
+  margin: 0 0 8px;
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.metric-placeholder {
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+  padding: 28px 8px;
+}
+
+.dashboard-body {
+  display: flex;
+  align-items: stretch;
+}
+
+.sidebar {
+  width: 232px;
+  flex-shrink: 0;
+  padding: 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sidebar.collapsed {
+  width: 68px;
+}
+
+.sidebar-toggle {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+/* Sidebar header row (Jake, 2026-10-31): the "Main Menu" label
+   and the collapse chevron share one row — label left, chevron
+   right. The label's usual top/bottom margins are dropped here;
+   its left margin stays so the text lines up with the nav
+   buttons below. */
+.sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sidebar-head .nav-group-label {
+  margin: 0 0 0 12px;
+}
+
+/* Collapsed: the label is hidden (see the collapsed rules
+   below), so center the lone chevron in the narrow sidebar. */
+.sidebar.collapsed .sidebar-head {
+  justify-content: center;
+}
+
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.nav-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text);
+  padding: 10px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 15px;
+}
+
+.nav-btn:hover {
+  background: var(--panel-2);
+}
+
+.nav-btn.active {
+  background: var(--nav-active-bg);
+  border-color: transparent;
+  color: var(--nav-active-text);
+  box-shadow: inset 3px 0 0 var(--teal-deep);
+}
+
+.nav-icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.nav-icon svg {
+  display: block;
+}
+
+.sidebar.collapsed .nav-label {
+  display: none;
+}
+
+.sidebar.collapsed .nav-btn {
+  justify-content: center;
+  padding: 10px 0;
+}
+
+.people-layout {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: 24px;
+  align-items: start;
+}
+
+.zone-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 0 16px;
+}
+
+.legend-item {
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.patient-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--border);
+}
+
+.patient-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.patient-name {
+  font-size: 16px;
+}
+
+/* Patients v2: status + clinician shown next to the name in list rows. */
+.patient-meta {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.day-schedule {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  position: sticky;
+  top: 16px;
+}
+
+.day-schedule h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.day-date {
+  margin: 2px 0 16px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.day-grid {
+  position: relative;
+  margin-left: 4px;
+}
+
+.day-hour {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px solid var(--border);
+  padding-top: 2px;
+}
+
+.day-hour span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.day-entry {
+  position: absolute;
+  left: 56px;
+  right: 0;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.day-entry strong {
+  display: block;
+}
+
+.day-entry span {
+  color: var(--muted);
+}
+
+@media (max-width: 1000px) {
+  .people-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .metrics-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .dashboard-body {
+    flex-direction: column;
+  }
+
+  .sidebar {
+    width: 100%;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .sidebar.collapsed {
+    width: 100%;
+  }
+
+  .sidebar-nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .sidebar.collapsed .nav-label {
+    display: inline;
+  }
+
+  .sidebar.collapsed .nav-btn {
+    padding: 10px 12px;
+  }
+}
+
+.day-agenda {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .metrics-row {
+    display: none;
+  }
+
+  .signed-in-as {
+    display: none;
+  }
+
+  .header-right {
+    width: auto;
+  }
+
+  .sidebar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    z-index: 50;
+    flex-direction: row;
+    align-items: center;
+    padding: 8px;
+    background: var(--panel);
+    border-top: 1px solid var(--border);
+  }
+
+  .sidebar-nav {
+    flex: 1;
+    flex-wrap: nowrap;
+  }
+
+  .sidebar .nav-label {
+    display: none;
+  }
+
+  .sidebar .nav-btn {
+    flex: 1;
+    width: auto;
+    justify-content: center;
+    padding: 12px 0;
+  }
+
+  .sidebar-toggle {
+    display: none;
+  }
+
+  .app-main {
+    padding-bottom: 96px;
+  }
+
+  .day-grid {
+    display: none;
+  }
+
+  .day-agenda {
+    display: block;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    border-top: 1px solid var(--border);
+  }
+
+  .day-agenda-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 4px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .agenda-time {
+    color: var(--muted);
+    font-size: 13px;
+    min-width: 64px;
+  }
+}
+
+/* ---------- Forced desktop view (preview toggle) ---------- */
+/* Overrides the responsive rules so the desktop arrangement shows even
+   on a phone screen. The shell gets a desktop-width canvas the user can
+   scroll and pinch around; the toggle resets when the page reloads. */
+
+.app-shell.force-desktop {
+  min-width: 1020px;
+}
+
+.force-desktop .metrics-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+}
+
+.force-desktop .signed-in-as {
+  display: inline;
+}
+
+.force-desktop .header-right {
+  width: auto;
+}
+
+.force-desktop .dashboard-body {
+  flex-direction: row;
+}
+
+.force-desktop .sidebar {
+  position: static;
+  width: 232px;
+  flex-direction: column;
+  padding: 16px 12px;
+  background: transparent;
+  border-top: none;
+}
+
+.force-desktop .sidebar.collapsed {
+  width: 68px;
+}
+
+.force-desktop .sidebar-nav {
+  flex-direction: column;
+  flex: none;
+  flex-wrap: nowrap;
+}
+
+.force-desktop .sidebar .nav-label {
+  display: inline;
+}
+
+.force-desktop .sidebar.collapsed .nav-label {
+  display: none;
+}
+
+.force-desktop .sidebar .nav-btn {
+  flex: none;
+  width: 100%;
+  justify-content: flex-start;
+  padding: 10px 12px;
+}
+
+.force-desktop .sidebar.collapsed .nav-btn {
+  justify-content: center;
+  padding: 10px 0;
+}
+
+.force-desktop .sidebar-toggle {
+  display: block;
+}
+
+.force-desktop .app-main {
+  padding-bottom: 48px;
+}
+
+.force-desktop .people-layout {
+  grid-template-columns: 1fr 340px;
+}
+
+/* Overview layout with a single panel (Today's schedule
+   removed 2026-10-30 — Urgent triage spans full width). */
+.people-layout.single,
+.force-desktop .people-layout.single {
+  grid-template-columns: 1fr;
+}
+
+/* Patient-form agency picker (2026-10-30): type-ahead over
+   the IDPH directory + free-text fallback. The dropdown
+   reuses the .addr-* suggestion styles; the picker adds the
+   selected-chip row and the scope/mode toggle links. */
+.agency-picker {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+/* Input + dropdown wrapper: the dropdown anchors to THIS box
+   (top: 100% = directly under the input), not to the whole
+   picker — anchoring to the picker rendered it below the
+   scope/mode toggle links. Same pattern as .addr-wrap. */
+.agency-picker-field {
+  position: relative;
+}
+.agency-picker .addr-drop {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 30;
+}
+.agency-picker-note {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.agency-picker .addr-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.agency-picker-selected {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.agency-picker-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+.agency-picker-toggle {
+  font-size: 13px;
+}
+
+.force-desktop .day-grid {
+  display: block;
+}
+
+.force-desktop .day-agenda {
+  display: none;
+}
+
+/* ---------- Modern theme: soft card shadows (light only) ---------- */
+
+.card,
+.stat-card,
+.chart-card,
+.day-schedule,
+.metric-card,
+.zone-card,
+.login-card {
+  box-shadow: var(--shadow);
+}
+
+.theme-toggle {
+  margin-left: auto;
+}
+
+/* ---------- Mediso-style sidebar ---------- */
+
+.sidebar {
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+}
+
+.sidebar-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.sidebar-search input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+}
+
+.search-clear {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+  padding: 0 2px;
+}
+
+.nav-group-label {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 16px 0 6px 12px;
+}
+
+.nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.nav-submenu {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-left: 22px;
+  border-left: 1px solid var(--border);
+  padding-left: 8px;
+}
+
+.nav-sub-btn {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  text-align: left;
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.nav-sub-btn.active {
+  color: var(--nav-active-text);
+  background: var(--nav-active-bg);
+  font-weight: 600;
+}
+
+.sidebar.collapsed .sidebar-search,
+.sidebar.collapsed .nav-group-label,
+.sidebar.collapsed .nav-submenu {
+  display: none;
+}
+
+/* ---------- Patient profile ---------- */
+
+.profile-layout {
+  /* Single column since the patient selector panel was
+     removed (2026-10-30): heading + full-width profile card. */
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+  align-items: start;
+}
+.profile-heading {
+  margin: 0;
+}
+.profile-edit-btn {
+  margin-left: auto;
+  align-self: flex-start;
+  flex-shrink: 0;
+  /* Icon-only since 2026-10-31: center the Pencil and use
+     compact square padding instead of the .btn text padding. */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+}
+
+.patient-select {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.patient-select.selected {
+  background: var(--nav-active-bg);
+}
+
+.profile-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: var(--shadow);
+}
+
+.profile-head {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.profile-head h2 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.profile-sub {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.avatar-circle {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--teal-deep);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+/* Clinician (staff) card avatars ONLY, color-coded by active
+   status (Jake, 2026-10-30): active = green, inactive = grey.
+   The patient profile avatar keeps the default teal. */
+.avatar-circle.avatar-active {
+  background: var(--green);
+}
+.avatar-circle.avatar-inactive {
+  background: var(--muted);
+}
+
+.profile-zone {
+  border-left: 4px solid var(--teal-deep);
+  padding-left: 12px;
+  margin-bottom: 12px;
+}
+
+.profile-zone p {
+  margin: 4px 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.profile-note {
+  font-size: 15px;
+}
+
+.profile-details {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin: 16px 0;
+}
+
+.profile-details div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.profile-details span {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.profile-details strong {
+  font-size: 15px;
+}
+
+.profile-card h3 {
+  margin: 20px 0 8px;
+  font-size: 16px;
+}
+
+/* ---------- Overview schedule + add-patient form ---------- */
+
+.schedule-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--border);
+}
+
+.schedule-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.overview-panel h2 {
+  margin: 0 0 12px;
+  font-size: 18px;
+}
+
+.add-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 520px;
+}
+
+.add-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* Non-label field wrapper for custom dropdowns whose suggestion
+   rows must not trigger label activation behavior. It mirrors
+   .add-form label exactly so the layout does not shift. */
+.add-form .form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* Patients v2: grouped Add Patient form (name / contact /
+   demographics / care & consent / emergency contact / billing). */
+.add-form h3 {
+  margin: 10px 0 0;
+  font-size: 16px;
+}
+
+.add-form label.checkbox-label {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.add-form label.checkbox-label input {
+  width: auto;
+}
+
+.add-form input,
+.add-form select,
+.add-form textarea {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 10px 12px;
+  font: inherit;
+}
+
+.add-form textarea {
+  resize: vertical;
+}
+
+/* Side-by-side field pair on the Add Patient form (State + ZIP). */
+.add-form .form-row {
+  display: flex;
+  gap: 14px;
+}
+
+.add-form .form-row label {
+  flex: 1;
+}
+
+@media (max-width: 1000px) {
+  .profile-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .sidebar-search {
+    display: none;
+  }
+
+  .nav-group-label {
+    display: none;
+  }
+
+  .nav-submenu {
+    display: none;
+  }
+
+  .sidebar-nav {
+    display: contents;
+  }
+
+  .nav-group {
+    display: contents;
+  }
+}
+
+/* ---------- Forced desktop view: undo the mobile rules ---------- */
+
+.force-desktop .sidebar-search {
+  display: flex;
+}
+
+.force-desktop .nav-group-label {
+  display: block;
+}
+
+.force-desktop .nav-submenu {
+  display: flex;
+}
+
+.force-desktop .sidebar-nav {
+  display: flex;
+}
+
+.force-desktop .nav-group {
+  display: block;
+}
+
+.force-desktop .sidebar.collapsed .sidebar-search,
+.force-desktop .sidebar.collapsed .nav-group-label,
+.force-desktop .sidebar.collapsed .nav-submenu {
+  display: none;
+}
+
+/* ---------- Mobile bottom bar: scroll when icons outgrow the phone ---------- */
+
+@media (max-width: 720px) {
+  .sidebar {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+  }
+
+  .sidebar .nav-btn {
+    flex: 0 0 auto;
+    min-width: 52px;
+    justify-content: center;
+  }
+}
+
+/* ---------- Page header with an action button ---------- */
+
+.page-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.page-head h1 {
+  margin: 0;
+}
+
+.stat-icon {
+  color: var(--teal-deep);
+  margin-bottom: 6px;
+}
+
+.stat-icon svg {
+  display: block;
+}
+
+.header-right .btn,
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+}
+
+.nav-chevron {
+  display: inline-flex;
+  align-items: center;
+}
+
+.nav-chevron svg {
+  display: block;
+}
+
+.sidebar-search svg,
+.sidebar-toggle svg {
+  display: block;
+}
+
+/* Address autocomplete (Add Patient street field) — dropdown under the
+   input, themed with the dashboard variables. */
+.addr-wrap {
+  position: relative;
+}
+
+.addr-wrap input {
+  width: 100%;
+}
+
+.addr-drop {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 40;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  font-weight: 400;
+}
+
+.addr-item {
+  padding: 10px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.addr-hl {
+  background: var(--nav-active-bg);
+}
+
+.addr-muted {
+  color: var(--muted);
+  cursor: default;
+}
+
+.addr-attrib {
+  padding: 4px 12px 6px;
+  font-size: 11px;
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+}
+
+/* Duplicate-patient warning on the Add Patient form. */
+.dup-panel {
+  background: var(--badge-amber-bg);
+  border: 1px solid var(--amber);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
+.dup-panel p {
+  margin: 0 0 6px;
+}
+
+.dup-panel p:last-child {
+  margin-bottom: 0;
+  color: var(--muted);
+}
+
+.dup-panel ul {
+  margin: 0 0 6px;
+  padding-left: 18px;
+}
+
+.dup-panel li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 4px 0;
+}
+
+.dup-open {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 8px;
+  white-space: nowrap;
+}
+
+/* Patient Profile actions + manager PIN gate + delete confirm. */
+.profile-actions {
+  display: flex;
+  gap: 10px;
+  margin: 12px 0;
+  flex-wrap: wrap;
+}
+
+.btn-danger {
+  background: var(--badge-red-bg);
+  border: 1px solid var(--red);
+  border-radius: 8px;
+  color: var(--red);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+  padding: 9px 14px;
+}
+
+.pin-panel {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin: 12px 0;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.pin-panel p {
+  margin: 0;
+}
+
+.pin-panel label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.pin-panel input {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 10px 12px;
+  font: inherit;
+  max-width: 180px;
+}
+
+.pin-panel .profile-actions {
+  margin: 4px 0 0;
+}
+
+.pin-error {
+  color: var(--red);
+  font-size: 13px;
+  margin: 0;
+}
+
+/* Google Contacts import picker (prototype). */
+.contact-picker {
+  border: 1px solid var(--border, #d8dee6);
+  border-radius: 12px;
+  padding: 16px;
+  margin: 16px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.contact-picker-search {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border, #d8dee6);
+  border-radius: 8px;
+  font: inherit;
+}
+
+.contact-picker-list {
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.contact-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  font: inherit;
+  cursor: pointer;
+  padding: 2px 0;
+}
+
+label.contact-picker-row {
+  cursor: pointer;
+}
+
+/* ---- Calendar (Appointment tab) ---- */
+.cal-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.cal-nav {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.cal-title {
+  font-size: 1.05rem;
+  margin-left: 6px;
+}
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.cal-dow {
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 8px;
+  text-align: center;
+}
+.cal-cell {
+  background: var(--panel);
+  min-height: 104px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  cursor: pointer;
+}
+.cal-cell.cal-out {
+  opacity: 0.45;
+}
+.cal-cell.cal-selected {
+  box-shadow: inset 0 0 0 2px var(--teal);
+}
+.cal-date {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+.cal-today .cal-date {
+  background: var(--teal);
+  color: #fff;
+  border-radius: 999px;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.cal-chip {
+  text-align: left;
+  border: none;
+  border-left: 3px solid var(--teal);
+  background: var(--bg);
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text);
+}
+.cal-chip-time {
+  color: var(--muted);
+}
+.cal-chip-muted {
+  opacity: 0.55;
+  text-decoration: line-through;
+}
+.cal-more {
+  font-size: 0.7rem;
+  color: var(--muted);
+  padding-left: 4px;
+}
+.cal-daylist {
+  margin-top: 16px;
+}
+.cal-day-row {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  width: 100%;
+  text-align: left;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--teal);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  color: var(--text);
+  box-shadow: var(--shadow);
+}
+.cal-day-time {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+.cal-week {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 10px;
+}
+.cal-week-day {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.cal-week-day h3 {
+  margin: 0 0 4px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.cal-today-num {
+  background: var(--teal);
+  color: #fff;
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+.cal-week-block {
+  text-align: left;
+  border: none;
+  border-left: 4px solid var(--teal);
+  border-radius: 8px;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 0.78rem;
+  cursor: pointer;
+  color: var(--text);
+}
+.cal-add-slot {
+  border: 1px dashed var(--border);
+  background: transparent;
+  border-radius: 8px;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 2px 0;
+}
+.cal-agenda-day h3,
+.cal-daylist h3 {
+  margin: 14px 0 8px;
+}
+.cal-detail {
+  margin-top: 16px;
+}
+.cal-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-top: 10px;
+}
+.cal-detail-actions select,
+.cal-form select,
+.cal-form input,
+.cal-form textarea {
+  font: inherit;
+}
+.cal-form .form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+.cal-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.cal-form .form-wide {
+  grid-column: 1 / -1;
+}
+.cal-form input,
+.cal-form select,
+.cal-form textarea {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--panel);
+  color: var(--text);
+}
+@media (max-width: 900px) {
+  .cal-week {
+    grid-template-columns: 1fr;
+  }
+  .cal-cell {
+    min-height: 72px;
+  }
+}
+
+/* ---- Settings: visit categories ---- */
+.cat-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.cat-row:last-child {
+  border-bottom: none;
+}
+.cat-swatch {
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+  margin-top: 3px;
+  flex: none;
+}
+.cat-main {
+  flex: 1;
+}
+.cat-form {
+  margin-top: 14px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+.cat-color-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.cat-color-row input[type="color"] {
+  width: 44px;
+  height: 36px;
+  padding: 2px;
+}
+
+/* ---- Messages ---- */
+.nav-badge {
+  display: inline-block;
+  min-width: 20px;
+  text-align: center;
+  background: var(--teal);
+  color: #fff;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 1px 6px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+.msg-row {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 12px;
+  cursor: pointer;
+  color: var(--text);
+}
+.msg-row.unread {
+  border-color: var(--teal);
+}
+.msg-who {
+  font-weight: 600;
+  min-width: 130px;
+}
+.msg-main {
+  flex: 1;
+}
+.msg-bubble {
+  border-bottom: 1px solid var(--border);
+  padding: 10px 0;
+}
+.msg-bubble:last-of-type {
+  border-bottom: none;
+}
+.linklike {
+  background: none;
+  border: none;
+  color: var(--teal);
+  cursor: pointer;
+  padding: 0;
+  font: inherit;
+  text-decoration: underline;
+  /* Buttons center their label by UA default; a link-styled
+     button should read like inline text (Jake, 2026-10-30 —
+     agency names in the directory table looked centered). */
+  text-align: left;
+}
+
+/* Agency directory table: the Agency column is left-justified,
+   header included (Jake, 2026-10-30). */
+.agency-table-wrap .data-table th:first-child,
+.agency-table-wrap .data-table td:first-child {
+  text-align: left;
+}
+
+/* Agency directory: the table sits in its own scroll region,
+   about one screen tall, instead of stretching the page with
+   all ~595 rows (Jake, 2026-10-30: "just a screen full and
+   just make it scrollable"). The frame (border / radius /
+   background) moves from the table to the wrap so it stays
+   put while the rows scroll; the table's own overflow and
+   border-collapse are neutralized because both trap
+   position: sticky — the column headers stick to the top of
+   the wrap while scrolling. The subtracted amounts cover the
+   banner + page header + card chrome + search/filter rows
+   above the table (and, on mobile, the fixed bottom bar). */
+.agency-table-wrap {
+  overflow: auto;
+  max-height: calc(100vh - 340px);
+  max-height: calc(100dvh - 340px);
+  min-height: 220px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+}
+
+.agency-table-wrap .data-table {
+  border: none;
+  border-radius: 0;
+  overflow: visible;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.agency-table-wrap .data-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--panel);
+}
+
+@media (max-width: 720px) {
+  /* Extra room for the fixed bottom icon bar. The generic
+     mobile rule turns .data-table into its own horizontal
+     scroll box, which would trap the sticky header — inside
+     the agency wrap the wrap is the single scroll container
+     for both axes, so the table stays a real table and gets
+     a min-width to scroll sideways instead of squishing. */
+  .agency-table-wrap {
+    max-height: calc(100vh - 410px);
+    max-height: calc(100dvh - 410px);
+  }
+
+  .agency-table-wrap .data-table {
+    display: table;
+    overflow: visible;
+    min-width: 540px;
+  }
+}
+
+/* ---- CareTask maps (Patients Map + day schedule map) ---- */
+.ct-map {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--panel-2);
+  z-index: 0;
+}
+.map-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+.ct-pin-wrap {
+  background: none;
+  border: none;
+}
+.ct-pin {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--pin-color);
+  color: #fff;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgba(16, 24, 40, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+}
+.ct-pin-approx {
+  background: transparent;
+  color: var(--pin-color);
+  border: 2px dashed #8a8f98;
+  box-shadow: none;
+}
+.ct-pin-selected {
+  outline: 3px solid var(--teal);
+  outline-offset: 1px;
+}
+.ct-popup {
+  font-size: 13px;
+  line-height: 1.45;
+  color: #17202a;
+}
+.ct-popup-approx {
+  color: #92400e;
+  font-weight: 600;
+  margin-top: 4px;
+}
+.ct-popup-btn {
+  margin-top: 8px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: 1px solid #0d9488;
+  background: #0d9488;
+  color: #fff;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+.map-notplaced {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+.link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--teal);
+  cursor: pointer;
+  text-decoration: underline;
+}
+.map-day-list {
+  list-style: none;
+  margin: 12px 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.map-day-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+}
+.map-day-row.selected {
+  border-color: var(--teal);
+  box-shadow: var(--shadow);
+}
+.map-day-num {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 13px;
+}
+.map-opt-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: end;
+  margin: 10px 0;
+}
+.map-opt-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1 1 260px;
+}
+.map-opt-row input {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+}
+
+/* Agency tab / Settings → Agency directory (IDPH directory) */
+.agency-display-name {
+  margin: 6px 0 2px;
+  font-size: 20px;
+}
+.agency-expiry-warn {
+  color: var(--amber);
+  font-weight: 600;
+}
+.agency-search-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  margin: 10px 0;
+}
+.agency-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 280px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.agency-search input {
+  flex: 1;
+  padding: 8px 0;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  outline: none;
+}
+/* The custom clear (X-circle) button replaces the browser's
+   built-in search clear so there is only one clear affordance. */
+.agency-search input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+}
+.agency-search-clear {
+  display: flex;
+  align-items: center;
+  background: none;
+  border: none;
+  padding: 2px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.agency-search-clear:hover {
+  color: var(--text);
+}
+/* CMS filters (2026-10-30): service-line chips + min-rating
+   select under the agency search row. */
+.agency-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: center;
+  margin: 2px 0 10px;
+}
+.agency-service-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.agency-service-chips .chip {
+  cursor: pointer;
+  font: inherit;
+}
+/* Service filter chip labels (Jake, 2026-10-31): spelled out
+   on desktop, abbreviated on phones. Both labels render in
+   separate spans and CSS picks which one shows — the same
+   force-desktop-aware pattern as the Patient List rules. */
+.agency-service-chips .chip-label-short {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .agency-service-chips .chip-label-full {
+    display: none;
+  }
+  .agency-service-chips .chip-label-short {
+    display: inline;
+  }
+}
+
+.force-desktop .agency-service-chips .chip-label-full {
+  display: inline;
+}
+.force-desktop .agency-service-chips .chip-label-short {
+  display: none;
+}
+.agency-rating-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+}
+.agency-rating-filter select {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+}
+/* Profile card CMS rating line + services list (2026-10-30). */
+.agency-rating-line {
+  font-size: 15px;
+  margin: 2px 0 8px;
+}
+.agency-rating-star {
+  color: var(--orange);
+  font-weight: 600;
+}
+.agency-service-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 14px;
+}
+.agency-inactive-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+}
+.agency-table-wrap {
+  overflow-x: auto;
+}
+.agency-edit-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 8px 0;
+}
+.agency-edit-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+.agency-edit-grid input,
+.agency-edit-grid textarea {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+}
+
+/* Agency profile card (2026-10-30): opened by tapping an agency
+   name in the directory; shows every field for that agency. */
+.agency-profile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px 18px;
+  margin: 12px 0 16px;
+}
+.agency-field-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 2px;
+}
+
+/* Patient List table (2026-10-30): sortable columns, zone dot
+   before the name, tap/click a row to open the profile. */
+.patients-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.patients-table th,
+.patients-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: middle;
+}
+.patients-table .th-sort,
+.data-table .th-sort {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+  cursor: pointer;
+}
+.patient-table-row {
+  cursor: pointer;
+}
+.patient-table-row:hover {
+  background: var(--panel-2, rgba(127, 127, 127, 0.08));
+}
+
+/* Patient List mobile row actions (Jake, 2026-10-31): on phones
+   the Age/Sex column hides, the Address cell swaps its text for
+   a directions icon, and a call-icon column appears after it.
+   Desktop keeps the text columns exactly as before — the
+   directions icon and the whole call column are display:none —
+   and .force-desktop restores the desktop arrangement on small
+   screens, following the same pattern as the other responsive
+   rules above. */
+.patients-table .table-icon-link {
+  color: var(--teal);
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  border-radius: 8px;
+}
+.patients-table .col-call .table-icon-link {
+  display: inline-flex;
+}
+.patients-table .address-directions,
+.patients-table .col-call {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .patients-table .col-agesex {
+    display: none;
+  }
+  .patients-table .address-text {
+    display: none;
+  }
+  .patients-table .address-directions {
+    display: inline-flex;
+  }
+  .patients-table .col-call {
+    display: table-cell;
+  }
+}
+
+.force-desktop .patients-table .col-agesex {
+  display: table-cell;
+}
+.force-desktop .patients-table .address-text {
+  display: inline;
+}
+.force-desktop .patients-table .address-directions {
+  display: none;
+}
+.force-desktop .patients-table .col-call {
+  display: none;
+}
+
+/* Profile address -> Google Maps directions (2026-10-30). */
+.address-link {
+  color: var(--teal);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* Profile status color bar (2026-10-30): the patient's status
+   shown as color only — green = active, yellow = on hold,
+   red = discharged. */
+.status-bar {
+  height: 8px;
+  border-radius: 999px;
+  margin: 10px 0 4px;
+}
+.status-bar-green {
+  background: var(--green);
+}
+.status-bar-yellow {
+  background: var(--amber);
+}
+.status-bar-red {
+  background: var(--red);
+}
+
+/* Tapping the profile header opens the edit flow (2026-10-30). */
+.profile-head.tappable {
+  cursor: pointer;
+}
+
+/* Settings → Theme: color-theme picker (2026-10-30). One tappable
+   chip per color theme; the swatch dots show the theme's accent +
+   secondary colors for light mode (first pair) and dark mode
+   (second pair). Selecting a chip applies immediately. */
+.theme-picker-label {
+  margin: 16px 0 8px;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.theme-chip-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.theme-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.theme-chip:hover {
+  border-color: var(--steel);
+}
+
+.theme-chip.active {
+  border-color: var(--teal-deep);
+  box-shadow: inset 0 0 0 1px var(--teal-deep);
+}
+
+.theme-chip:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+}
+
+.theme-chip-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+}
+
+.theme-chip-name {
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.theme-chip-active {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--teal-deep);
+}
+
+.theme-swatches {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.theme-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  flex: none;
+}
+
+.theme-swatch-sep {
+  width: 8px;
+  flex: none;
+}
+
+.theme-chip-blurb {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* Settings → Database utilities: CSV import (2026-10-30).
+   Preview table scrolls both ways inside the card; row statuses
+   use the theme's semantic colors (zone/status colors are never
+   re-themed, and these follow the same variables). */
+.csv-import-panel {
+  border-top: 1px solid var(--border);
+  margin-top: 14px;
+  padding-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.csv-table-wrap {
+  overflow: auto;
+  max-height: 430px;
+}
+
+.csv-table-wrap .data-table {
+  min-width: 660px;
+}
+
+.csv-status {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.csv-status-ready {
+  color: var(--green);
+}
+
+.csv-status-missing {
+  color: var(--red);
+}
+
+.csv-status-duplicate,
+.csv-status-team,
+.csv-status-infile {
+  color: var(--amber);
+}
+
+.csv-summary p {
+  margin: 0;
+  font-weight: 600;
+}
+
+.csv-failures {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  color: var(--red);
+  font-size: 13px;
+}
+
+/* Staff grouping headings (Clinical / Non-clinical) on the
+   Clinician page and the Contacts directory (2026-10-30). */
+.staff-group-heading {
+  font-size: 17px;
+  margin: 22px 0 10px;
+}
