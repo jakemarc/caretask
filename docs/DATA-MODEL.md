@@ -40,8 +40,8 @@ is unknown).
 \* NOT NULL. Modeled on OpenEMR's `patient_data` core fields.
 
 Age fallback (`age`, added 2026-11-01 by
-`schema-patients-age.sql` — additive, idempotent, built
-locally, not yet deployed): INTEGER, NULL, CHECK 0–130.
+`schema-patients-age.sql` — additive, idempotent, LIVE on the
+VM since deploy-17, 2026-11-01): INTEGER, NULL, CHECK 0–130.
 Date of birth and sex are OPTIONAL on patient create (Jake,
 2026-11-01 — reversing the 2026-10-30 required rule), so a
 patient can exist with no birth date; `age` records their age

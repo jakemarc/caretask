@@ -7,8 +7,11 @@ built and verified but not deployed.
 ## 2026-11-01
 
 - **Patients rename + optional DOB/sex + stored age + Age/Sex
-  column removal + CSV import fix — Local (2026-11-01, Jake;
-  built and verified, not deployed).** The sidebar button and
+  column removal + CSV import fix — Live (2026-11-01, Jake;
+  deploy-17: dashboard bundle `index-BwSBwNpi.js`, deployment
+  https://3f6882a3.marcinnotech-app.pages.dev, main URL
+  verified serving it; API migration + routes deployed to the
+  VM the same round, /health ok, 401 without a token).** The sidebar button and
   list page are now **Patients** (was Patient / Patient List);
   Patient Profile and Add Patient keep their singular names.
   The patients table gains an `age` column
@@ -33,9 +36,7 @@ built and verified but not deployed.
   and age checks), the dashboard builds (bundle
   `index-BwSBwNpi.js`, API URL baked in, zero "Age/Sex"
   strings), and the import's required-field logic checks 4/4
-  against the transpiled module. Deploy needs the API
-  migration + routes file on the VM and a dashboard redeploy
-  (deploy-17 candidate).
+  against the transpiled module.
 
 ## 2026-10-31
 
