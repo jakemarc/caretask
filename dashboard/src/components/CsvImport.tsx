@@ -524,7 +524,7 @@ export default function CsvImport({
           </div>
           <p className="section-note">
             {flow === "patients"
-              ? "Patients need a first name, last name, date of birth, and sex — rows missing any of those can't be imported."
+              ? "Patients need a first and last name — rows missing either can't be imported. Date of birth and sex are optional."
               : "Staff need an email, first name, and last name. Imported staff start as clinicians who are not yet authorized; a manager can change the role afterwards. A manager PIN is required to save."}
           </p>
           <input

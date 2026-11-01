@@ -1,27 +1,31 @@
 # Data Model
 
-Last updated: 2026-10-30
+Last updated: 2026-11-01
 Database: `caretask_demo` (PostgreSQL 16) on the API VM.
 Schemas (apply in this order): `patient-api/schema.sql`,
 `schema-events.sql`, `schema-patients-v2.sql`,
 `schema-patients-map.sql`, `schema-users.sql`,
 `schema-users-position.sql`, `schema-appointments.sql`,
 `schema-messages.sql`,
-`schema-documents.sql`, `schema-agencies.sql`.
+`schema-documents.sql`, `schema-agencies.sql`,
+`schema-agencies-cms.sql`, `schema-patients-agency.sql`,
+`schema-patients-age.sql`, `schema-expenses.sql`.
 
 Tables: `patients`, `users`, `appointment_categories`,
 `appointment_statuses`, `appointments`, `messages`, `documents`,
-`agencies`, `audit_log`, `event_log`.
+`agencies`, `expenses`, `audit_log`, `event_log`.
 
-## patients (v2 — 47 columns)
+## patients (v2 — 48 columns)
 
 Split name/address/phone (v2 migration, 2026-10-29, replaced the
 single `name`/`address`/`phone` columns and dropped `age_band` —
-age derives from date of birth).
+age derives from date of birth when one is recorded; the
+stored `age` column below covers patients whose birth date
+is unknown).
 
 | Group | Columns |
 |---|---|
-| Identity | id, title, fname*, mname, lname*, suffix, preferred_name, date_of_birth, sex |
+| Identity | id, title, fname*, mname, lname*, suffix, preferred_name, date_of_birth, age, sex |
 | Demographics | race, ethnicity, language, occupation, interpreter_needed (bool, default false) |
 | Address | street, street_line_2, city, state, postal_code, country_code, latitude, longitude (double precision, range-checked; NULL unless captured from an autocomplete pick) |
 | Contact | phone_home, phone_cell, email |
@@ -34,6 +38,16 @@ age derives from date of birth).
 | System | created_at, updated_at, deleted_at (soft delete) |
 
 \* NOT NULL. Modeled on OpenEMR's `patient_data` core fields.
+
+Age fallback (`age`, added 2026-11-01 by
+`schema-patients-age.sql` — additive, idempotent, built
+locally, not yet deployed): INTEGER, NULL, CHECK 0–130.
+Date of birth and sex are OPTIONAL on patient create (Jake,
+2026-11-01 — reversing the 2026-10-30 required rule), so a
+patient can exist with no birth date; `age` records their age
+in years for that case. Display rule: an age derived from
+date_of_birth wins; `age` is consulted only when there is no
+usable DOB. A stored age does not advance on its own.
 
 Agency tag (`agency_id` / `agency_name_text`, added 2026-10-30
 by `schema-patients-agency.sql` — additive, idempotent): a
@@ -180,6 +194,35 @@ counts only. BIGINT identity id (a directory table like
 users/appointments, not patients — agency ids never travel in
 URLs or event payloads the way patient UUIDs do).
 
+## expenses
+
+One row per staff expense (`schema-expenses.sql`, built locally
+2026-10-31 — not yet deployed; schema only, no routes/UI yet):
+id (BIGINT identity), `user_id` (BIGINT, FK → users.id — the
+connection to staff is by id, never by name; the employee name
+shown in lists is read from `users` with a JOIN),
+`expense_date`, `category` (CHECK list of the twelve standard
+categories: mileage, parking, tolls, medical_supplies,
+office_supplies, meals, travel, lodging, phone_internet,
+training, licenses, other), `description`, `vendor_name`,
+`amount_cents` (INTEGER ≥ 0 — money is integer cents, never
+floats), `currency` (default 'USD'), `payment_method`
+(personal_card / company_card / cash / other, nullable),
+`receipt_url`, `agency_id` (BIGINT, FK → agencies.id, nullable),
+`status` (draft / submitted / approved / rejected /
+reimbursed), `submitted_at`, `approved_by` (BIGINT, FK →
+users.id), `approved_at`, `reimbursed_at`,
+`reimbursement_ref`, `notes`, created_at / updated_at /
+deleted_at (soft delete; the runtime user has no DELETE grant).
+21 columns. Mileage trip detail (from/to, miles, rate) is NOT
+stored here — it belongs in a future `mileage_entries` table
+linked by expense id; a mileage expense row carries only the
+computed total in `amount_cents`. Verified locally: full schema
+chain applies, the file applies twice, FK/CHECK constraints
+reject bad user ids, categories and negative amounts, and the
+JOIN returns the right name even for two staff with identical
+names.
+
 ## audit_log (patient change history)
 
 id, patient_id, actor_uid, actor_email, action
@@ -195,7 +238,8 @@ id, seq, actor_uid, actor_email, event (patient_view / sign_in /
 sign_out / report_export / auth_failure / admin_action /
 api_request / appointment_change / message_send / message_read /
 document_create / document_update / document_finalize /
-agency_sync),
+agency_sync / expense_change — the last added by
+`schema-expenses.sql`, local only),
 patient_id (nullable, **no FK by design** — events
 about deleted/unknown patients must still record), details JSONB,
 ip, created_at, prev_hash, row_hash. Append-only, same triggers.

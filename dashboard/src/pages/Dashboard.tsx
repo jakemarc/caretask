@@ -224,12 +224,17 @@ function listName(p: PersonUnderCare): string {
 
 // Compact age/sex, "74/F" (Jake, 2026-10-30): exact age from
 // DOB via ageFromDob + sex initial (F/M; other sex values pass
-// through as recorded). Fallbacks mirror the profile header:
-// age alone, sex alone, the decade band, else "—". Shared by
-// the profile header and the Patient List Age/Sex column so
-// the two never drift.
+// through as recorded). Age falls back to the stored `age`
+// column when there is no usable DOB (Jake, 2026-11-01 — DOB
+// is optional now). Returns null when the patient has NEITHER
+// an age nor a sex recorded, so the profile header can hide
+// the segment entirely instead of showing a placeholder
+// (Jake, 2026-11-01). The Patient List's Age/Sex column was
+// removed the same day; this helper now serves the profile
+// header only.
 function ageSexLabel(p: PersonUnderCare): string | null {
-  const age = p.dateOfBirth ? ageFromDob(p.dateOfBirth) : null;
+  const age =
+    (p.dateOfBirth ? ageFromDob(p.dateOfBirth) : null) ?? p.age ?? null;
   const sexShort =
     p.sex === "Female" ? "F" : p.sex === "Male" ? "M" : (p.sex ?? null);
   if (age !== null && sexShort) return `${age}/${sexShort}`;
@@ -435,6 +440,7 @@ export default function Dashboard({
   const [formPostalCode, setFormPostalCode] = useState("");
   const [formCountryCode, setFormCountryCode] = useState("US");
   const [formDob, setFormDob] = useState("");
+  const [formAge, setFormAge] = useState("");
   const [formSex, setFormSex] = useState("");
   const [formRace, setFormRace] = useState("");
   const [formEthnicity, setFormEthnicity] = useState("");
@@ -582,6 +588,7 @@ export default function Dashboard({
   const [editMname, setEditMname] = useState("");
   const [editLname, setEditLname] = useState("");
   const [editDob, setEditDob] = useState("");
+  const [editAge, setEditAge] = useState("");
   const [editSex, setEditSex] = useState("");
   const [editPhoneHome, setEditPhoneHome] = useState("");
   const [editPhoneCell, setEditPhoneCell] = useState("");
@@ -1005,6 +1012,7 @@ export default function Dashboard({
     setEditMname(p.mname ?? "");
     setEditLname(p.lname ?? "");
     setEditDob(p.dateOfBirth ?? "");
+    setEditAge(p.age != null ? String(p.age) : "");
     setEditSex(p.sex ?? "");
     setEditPhoneHome(formatUSPhone(p.phoneHome ?? ""));
     setEditPhoneCell(formatUSPhone(p.phoneCell ?? ""));
@@ -1068,11 +1076,14 @@ export default function Dashboard({
       const t = s.trim();
       return t ? t : null;
     };
+    const editAgeParsed =
+      editAge.trim() === "" ? null : Number.parseInt(editAge, 10);
     const payload = {
       fname: editFname.trim(),
       mname: blankToNull(editMname),
       lname: editLname.trim(),
       date_of_birth: blankToNull(editDob),
+      age: Number.isNaN(editAgeParsed) ? null : editAgeParsed,
       sex: blankToNull(editSex),
       phone_home: blankToNull(editPhoneHome),
       phone_cell: blankToNull(editPhoneCell),
@@ -1122,6 +1133,7 @@ export default function Dashboard({
               mname: payload.mname,
               lname: payload.lname,
               dateOfBirth: payload.date_of_birth,
+              age: payload.age,
               ageBand: ageBandFromDob(payload.date_of_birth),
               sex: payload.sex,
               phoneHome: payload.phone_home,
@@ -1436,18 +1448,12 @@ export default function Dashboard({
 
   async function handleAddPatient(e: React.FormEvent) {
     e.preventDefault();
-    // Date of birth and Sex are required when ADDING a patient
-    // (Jake, 2026-10-30) — validated here so the save is blocked
-    // with a clear inline error, not just by the API's
-    // DOB_REQUIRED / SEX_REQUIRED 400s. (Edit is unaffected.)
-    if (!formDob.trim()) {
-      setAddFormError("Date of birth is required.");
-      return;
-    }
-    if (!formSex) {
-      setAddFormError("Sex is required.");
-      return;
-    }
+    // Date of birth and Sex were required when ADDING a patient
+    // from 2026-10-30 to 2026-11-01. Jake made both OPTIONAL on
+    // 2026-11-01 (the Age field covers patients whose birth date
+    // is unknown, and CSV imports must not block on a missing
+    // birthday/gender) — no validation for them here or in the
+    // API anymore.
     setAddFormError(null);
     const blankToNull = (s: string): string | null => {
       const t = s.trim();
@@ -1472,6 +1478,9 @@ export default function Dashboard({
       formPharmacyId.trim() === ""
         ? null
         : Number.parseInt(formPharmacyId, 10);
+    const formAgeParsed =
+      formAge.trim() === "" ? null : Number.parseInt(formAge, 10);
+    const ageYears = Number.isNaN(formAgeParsed) ? null : formAgeParsed;
     // When the API is configured, save there first so the patient
     // persists. Any failure falls back to the old session-only add —
     // the dashboard never loses the patient the clinician just typed.
@@ -1491,6 +1500,7 @@ export default function Dashboard({
       suffix: blankToNull(formSuffix),
       preferredName,
       dateOfBirth: blankToNull(formDob),
+      age: ageYears,
       sex: blankToNull(formSex),
       race: blankToNull(formRace),
       ethnicity: blankToNull(formEthnicity),
@@ -1536,6 +1546,7 @@ export default function Dashboard({
           suffix: blankToNull(formSuffix),
           preferred_name: preferredName,
           date_of_birth: blankToNull(formDob),
+          age: ageYears,
           sex: blankToNull(formSex),
           race: blankToNull(formRace),
           ethnicity: blankToNull(formEthnicity),
@@ -1608,6 +1619,7 @@ export default function Dashboard({
     setFormLng(null);
     setFormCountryCode("US");
     setFormDob("");
+    setFormAge("");
     setFormSex("");
     setFormRace("");
     setFormEthnicity("");
@@ -1645,18 +1657,18 @@ export default function Dashboard({
     ? people.filter((p) => p.name.toLowerCase().includes(q))
     : people;
 
-  // Patient List table sorting (Jake, 2026-10-30): click a column
+  // Patients table sorting (Jake, 2026-10-30): click a column
   // header to sort by it; click again to reverse. Default: last
-  // name, A-Z. Columns are Patient | Age/Sex | Address — the
-  // Zone, Status and Clinician columns were removed at Jake's
-  // direction (the zone dot before the name stays). Age sorts
-  // by date_of_birth (dir 1 = youngest first; no-DOB rows last
-  // in both directions); Address sorts by street, then city.
+  // name, A-Z. Columns are Patient | Address — the Zone, Status
+  // and Clinician columns were removed at Jake's direction (the
+  // zone dot before the name stays), and the Age/Sex column was
+  // removed 2026-11-01 (also Jake). Address sorts by street,
+  // then city.
   const [listSort, setListSort] = useState<{
-    key: "name" | "age" | "address";
+    key: "name" | "address";
     dir: 1 | -1;
   }>({ key: "name", dir: 1 });
-  function toggleListSort(key: "name" | "age" | "address") {
+  function toggleListSort(key: "name" | "address") {
     setListSort((prev) =>
       prev.key === key
         ? { key, dir: prev.dir === 1 ? -1 : 1 }
@@ -1664,16 +1676,6 @@ export default function Dashboard({
     );
   }
   const sortedPeople = [...visiblePeople].sort((a, b) => {
-    if (listSort.key === "age") {
-      const av = a.dateOfBirth ?? null;
-      const bv = b.dateOfBirth ?? null;
-      if (av === null && bv === null) return 0;
-      if (av === null) return 1;
-      if (bv === null) return -1;
-      // ISO dates sort lexicographically; descending DOB is
-      // youngest first.
-      return (av < bv ? 1 : av > bv ? -1 : 0) * listSort.dir;
-    }
     if (listSort.key === "address") {
       const av = `${a.street ?? ""} ${a.city ?? ""}`.toLowerCase();
       const bv = `${b.street ?? ""} ${b.city ?? ""}`.toLowerCase();
@@ -1699,10 +1701,10 @@ export default function Dashboard({
       clinician: "Unassigned",
     };
   // Compact age/sex for the profile header (Jake, 2026-10-30):
-  // "74/F" — exact age from DOB, sex as F/M. Falls back to the
-  // decade band for people without a DOB (the in-browser demo
-  // set). Shared helper — the Patient List Age/Sex column uses
-  // the same label.
+  // "74/F" — exact age from DOB, sex as F/M, stored-age
+  // fallback when there is no DOB (2026-11-01). Null when the
+  // patient has neither — the header's filter(Boolean) then
+  // drops the segment entirely (Jake, 2026-11-01).
   const selectedAgeSex = ageSexLabel(selectedPerson);
   const selectedDay = daySchedule.filter(
     (e) => e.person === selectedPerson.name,
@@ -1809,11 +1811,11 @@ export default function Dashboard({
               <button
                 className={patientActive ? "nav-btn active" : "nav-btn"}
                 onClick={handlePatientGroupClick}
-                title="Patient"
+                title="Patients"
               >
                 <span className="nav-icon"><Users size={20} /></span>
                 <span className="nav-label">
-                  Patient{" "}
+                  Patients{" "}
                   <span className="nav-chevron">
                     {patientGroupOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                   </span>
@@ -1827,7 +1829,7 @@ export default function Dashboard({
                     }
                     onClick={() => setTab("list")}
                   >
-                    Patient List
+                    Patients
                   </button>
                   {/* Patient Profile nav entry removed (Jake,
                       2026-10-30) — the profile view stays reachable
@@ -2531,7 +2533,7 @@ export default function Dashboard({
             // the Dashboard overview.
             <section className="people-layout single">
               <div className="patient-list-panel">
-                <h1>Patient List</h1>
+                <h1>Patients</h1>
                 {/* Page search (Jake, 2026-10-30) — replaces the
                     zone legend; drives the shared query state and
                     visiblePeople filters from it. (The sidebar
@@ -2590,20 +2592,6 @@ export default function Dashboard({
                             : ""}
                         </button>
                       </th>
-                      <th className="col-agesex">
-                        <button
-                          type="button"
-                          className="th-sort"
-                          onClick={() => toggleListSort("age")}
-                        >
-                          Age/Sex
-                          {listSort.key === "age"
-                            ? listSort.dir === 1
-                              ? " ↑"
-                              : " ↓"
-                            : ""}
-                        </button>
-                      </th>
                       <th>
                         <button
                           type="button"
@@ -2653,9 +2641,6 @@ export default function Dashboard({
                             <span className="patient-name">
                               {listName(p)}
                             </span>
-                          </td>
-                          <td className="col-agesex">
-                            {ageSexLabel(p) ?? "—"}
                           </td>
                           <td>
                             <span
@@ -2871,6 +2856,17 @@ export default function Dashboard({
                         type="date"
                         value={editDob}
                         onChange={(e) => setEditDob(e.target.value)}
+                      />
+                    </label>
+                    <label>
+                      Age (if birth date unknown)
+                      <input
+                        type="number"
+                        min={0}
+                        max={130}
+                        inputMode="numeric"
+                        value={editAge}
+                        onChange={(e) => setEditAge(e.target.value)}
                       />
                     </label>
                     <label>
@@ -3210,18 +3206,27 @@ export default function Dashboard({
                   </div>
                 )}
                 <label>
-                  Date of birth *
+                  Date of birth
                   <input
                     type="date"
-                    required
                     value={formDob}
                     onChange={(e) => setFormDob(e.target.value)}
                   />
                 </label>
                 <label>
-                  Sex *
+                  Age (if birth date unknown)
+                  <input
+                    type="number"
+                    min={0}
+                    max={130}
+                    inputMode="numeric"
+                    value={formAge}
+                    onChange={(e) => setFormAge(e.target.value)}
+                  />
+                </label>
+                <label>
+                  Sex
                   <select
-                    required
                     value={formSex}
                     onChange={(e) => setFormSex(e.target.value)}
                   >
@@ -3815,7 +3820,7 @@ export default function Dashboard({
                   <p>
                     Open Patient → Add Patient, fill in the first and last
                     name and zone, and submit. The patient appears in the
-                    Patient List and Patient Profile.
+                    Patients list and Patient Profile.
                   </p>
                 </article>
                 <article className="card">

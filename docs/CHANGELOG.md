@@ -4,7 +4,70 @@ All notable shipped changes to the CareTask platform. Newest first.
 "Live" means deployed and verified at the listed URL; "Local" means
 built and verified but not deployed.
 
+## 2026-11-01
+
+- **Patients rename + optional DOB/sex + stored age + Age/Sex
+  column removal + CSV import fix — Local (2026-11-01, Jake;
+  built and verified, not deployed).** The sidebar button and
+  list page are now **Patients** (was Patient / Patient List);
+  Patient Profile and Add Patient keep their singular names.
+  The patients table gains an `age` column
+  (`patient-api/schema-patients-age.sql`, INTEGER, CHECK 0–130,
+  additive + idempotent) for patients whose birth date is
+  unknown; `date_of_birth` and `sex` are OPTIONAL on patient
+  create (the 2026-10-30 `DOB_REQUIRED` / `SEX_REQUIRED` 400s
+  are retired, empty-string DOB normalizes to NULL, and the
+  dashboard form's client-side DOB/sex blocks and `*` markers
+  are gone). Both Add and Edit forms carry an "Age (if birth
+  date unknown)" field; display prefers a DOB-derived age and
+  falls back to the stored age. The Patients table's Age/Sex
+  column is removed (table is now Patient | Address); the
+  profile header shows the "74/F" segment only when the
+  patient has an age or a sex recorded — nothing shows when
+  neither is recorded. The CSV import no longer flags or
+  blocks rows missing a birthday or gender (patients now
+  require first + last name only); the yearless `--MM-DD`
+  birthday still maps to blank, never an invented year.
+  Verified: full patients API suite passes on a scratch
+  PostgreSQL 16 (75 checks incl. the new 11c DOB/sex-optional
+  and age checks), the dashboard builds (bundle
+  `index-BwSBwNpi.js`, API URL baked in, zero "Age/Sex"
+  strings), and the import's required-field logic checks 4/4
+  against the transpiled module. Deploy needs the API
+  migration + routes file on the VM and a dashboard redeploy
+  (deploy-17 candidate).
+
 ## 2026-10-31
+
+- **Expenses table created — Local (2026-10-31, schema only;
+  no API routes or dashboard UI yet, not deployed).** New
+  `patient-api/schema-expenses.sql` adds the `expenses` table
+  (21 columns) at Jake's direction. An expense belongs to a
+  staff member through `user_id` → `users.id` — by id, not by
+  name (names are not unique and change; the name shown in
+  lists comes from a JOIN on `users`). Fields: expense_date,
+  category (CHECK list of twelve: mileage, parking, tolls,
+  medical_supplies, office_supplies, meals, travel, lodging,
+  phone_internet, training, licenses, other), description,
+  vendor_name, amount_cents (integer cents, ≥ 0), currency,
+  payment_method, receipt_url, agency_id (FK → agencies,
+  nullable), the approval lifecycle (status draft / submitted
+  / approved / rejected / reimbursed; submitted_at,
+  approved_by → users, approved_at, reimbursed_at,
+  reimbursement_ref), notes, and soft delete (deleted_at; the
+  runtime user gets SELECT/INSERT/UPDATE only). The migration
+  also widens the event_log CHECK with `expense_change`
+  (additive only). Mileage trip detail deliberately stays out
+  of this table — a future `mileage_entries` table will link
+  by expense id; a mileage expense carries only its computed
+  total. Verified against a scratch PostgreSQL 16: the full
+  twelve-file schema chain applies cleanly, the new file
+  applies twice (idempotent), FK violations (bad user_id,
+  bad approved_by), a bad category and a negative amount are
+  all rejected, a JOIN returns the correct employee for two
+  staff with identical names, and as the limited `patient_api`
+  user INSERT/UPDATE/SELECT work while DELETE is denied.
+  DATA-MODEL.md updated in the same round.
 
 - **Agency tab demo block removed; sidebar search removed;
   collapse chevron moved beside "Main Menu"; Patient List

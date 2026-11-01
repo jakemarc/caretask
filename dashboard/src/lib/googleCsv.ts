@@ -144,8 +144,8 @@ function numberedPairs(
 
 // Birthday: Google writes ISO (YYYY-MM-DD), US exports also show
 // MM/DD/YYYY, and a yearless birthday as --MM-DD. The yearless form
-// has no year to store — DOB is required for patients and inventing
-// a year would be worse than leaving it blank — so it maps to "".
+// has no year to store — inventing a year would be worse than
+// leaving it blank (DOB is optional) — so it maps to "".
 export function parseGoogleBirthday(raw: string): string {
   const v = raw.trim();
   if (!v || v.startsWith("--")) return "";
@@ -352,17 +352,18 @@ export function parseGoogleContactsCsv(text: string): CsvContact[] {
 
 // ------------------------------------------------------------------
 // Required-field checks, shared by the preview and the tests.
-// Patients: first name, last name, date of birth, and sex are ALL
-// required on create (Jake, 2026-10-30). Staff: email is the
-// identity, plus first and last name.
+// Patients: first and last name only. Date of birth and sex
+// were required on create 2026-10-30 → 2026-11-01; Jake made
+// both OPTIONAL on 2026-11-01 (patients.age covers unknown
+// birth dates), so import rows are no longer blocked or flagged
+// for missing them. Staff: email is the identity, plus first
+// and last name.
 
 export function missingPatientFields(contact: CsvContact): string[] {
   const c = contact.candidate;
   const missing: string[] = [];
   if (!c.fname.trim()) missing.push("first name");
   if (!c.lname.trim()) missing.push("last name");
-  if (!c.dob) missing.push("date of birth");
-  if (!c.sex) missing.push("sex");
   return missing;
 }
 

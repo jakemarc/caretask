@@ -28,6 +28,10 @@ export interface ApiPatient {
   suffix: string | null;
   preferred_name: string | null;
   date_of_birth: string | null;
+  // Stored age in years (schema-patients-age.sql) — fallback
+  // for patients whose birth date is unknown; display prefers
+  // the age derived from date_of_birth when that is set.
+  age: number | null;
   sex: string | null;
   race: string | null;
   ethnicity: string | null;
@@ -82,6 +86,7 @@ export interface NewApiPatient {
   suffix?: string | null;
   preferred_name?: string | null;
   date_of_birth?: string | null;
+  age?: number | null;
   sex?: string | null;
   race?: string | null;
   ethnicity?: string | null;
@@ -238,6 +243,7 @@ export function toPersonUnderCare(raw: ApiPatient): PersonUnderCare {
     suffix: p.suffix,
     preferredName: p.preferred_name,
     dateOfBirth: p.date_of_birth,
+    age: p.age ?? null,
     sex: p.sex,
     race: p.race,
     ethnicity: p.ethnicity,

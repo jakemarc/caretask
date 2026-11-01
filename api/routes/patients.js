@@ -60,6 +60,11 @@ const WRITABLE = [
   'suffix',
   // Demographics.
   'date_of_birth',
+  // Age in years (schema-patients-age.sql) — the fallback for
+  // patients whose date of birth is unknown. Integer or null.
+  // Display prefers an age derived from date_of_birth; this
+  // column is only consulted when date_of_birth is NULL.
+  'age',
   'sex',
   'race',
   'ethnicity',
@@ -151,6 +156,13 @@ function validatePatient(fields) {
   ) {
     return 'flags must be an array of strings';
   }
+  // An empty string means "no birth date" (HTML date inputs
+  // submit ''), not a malformed date — normalize it to NULL
+  // before the format check.
+  if (typeof fields.date_of_birth === 'string'
+      && !fields.date_of_birth.trim()) {
+    fields.date_of_birth = null;
+  }
   if (
     fields.date_of_birth !== undefined &&
     fields.date_of_birth !== null &&
@@ -173,6 +185,13 @@ function validatePatient(fields) {
     !Number.isInteger(fields.pharmacy_id)
   ) {
     return 'pharmacy_id must be an integer';
+  }
+  if (
+    fields.age !== undefined &&
+    fields.age !== null &&
+    (!Number.isInteger(fields.age) || fields.age < 0 || fields.age > 130)
+  ) {
+    return 'age must be an integer between 0 and 130';
   }
   // agency_id: like the appointments route's references, an
   // integer-valued string is accepted (pg returns int8 as a
@@ -208,6 +227,7 @@ function validatePatient(fields) {
       key !== 'flags' &&
       !BOOLEAN_FIELDS.includes(key) &&
       key !== 'pharmacy_id' &&
+      key !== 'age' &&
       key !== 'agency_id' &&
       key !== 'latitude' &&
       key !== 'longitude' &&
@@ -439,26 +459,13 @@ router.post('/', async (req, res, next) => {
     if (!fields.lname || !fields.lname.trim()) {
       return res.status(400).json({ error: 'lname is required' });
     }
-    // Date of birth and sex are REQUIRED on create (Jake,
-    // 2026-10-30). Create-only scope: PUT/edit is unchanged,
-    // so records that predate the rule can still be edited.
-    // A deliberately chosen sex value — including "Unknown" —
-    // counts as provided.
-    if (!fields.date_of_birth
-        || (typeof fields.date_of_birth === 'string'
-            && !fields.date_of_birth.trim())) {
-      return res.status(400).json({
-        error: 'date_of_birth is required',
-        code: 'DOB_REQUIRED',
-      });
-    }
-    if (!fields.sex
-        || (typeof fields.sex === 'string' && !fields.sex.trim())) {
-      return res.status(400).json({
-        error: 'sex is required',
-        code: 'SEX_REQUIRED',
-      });
-    }
+    // Date of birth and sex were required on create from
+    // 2026-10-30 to 2026-11-01 (400 DOB_REQUIRED / SEX_REQUIRED).
+    // Jake reversed that on 2026-11-01: both are OPTIONAL now —
+    // the new `age` column covers patients whose birth date is
+    // unknown, and the CSV import no longer blocks rows that
+    // lack a birthday or a gender. Format validation above
+    // still applies whenever a value IS provided.
     const error = validatePatient(fields);
     if (error) return res.status(400).json({ error });
     normalizeAgencyFields(fields);

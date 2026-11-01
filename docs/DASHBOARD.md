@@ -45,7 +45,7 @@ src/
     theme.ts               mode + color-theme helpers, COLOR_THEMES picker metadata
 ```
 
-`Dashboard.tsx` holds the views: Dashboard overview, Patient List,
+`Dashboard.tsx` holds the views: Dashboard overview, Patients,
 Patient Profile, Add Patient, Clinician (staff directory), Agency,
 Contacts, Integrations, Settings, Help Center, and System → Audit
 Log. Clinician and Contacts are reached from Settings buttons,
@@ -53,18 +53,21 @@ not the sidebar (see the staff grouping contract below). Labels
 follow Jake's naming: **Clinician** (not Doctor),
 **Agency** (not Departments).
 
-Patient List is a sortable table (2026-10-30): names render as
+The Patients list is a sortable table (2026-10-30; renamed
+from "Patient List" and the sidebar button from "Patient" to
+**Patients** 2026-11-01, Jake): names render as
 "Lastname, Firstname" (no title/middle), the zone dot sits
-before the name, and the columns are **Patient | Age/Sex |
-Address**, all sortable on click — Age/Sex shows the profile's
-"74/F" label and sorts by date of birth (youngest/oldest,
-no-DOB last); Address shows the full address (street, line 2,
-city, state, ZIP) and sorts by street, then city. The Zone,
-Status, and Clinician columns were removed from the table at
-Jake's direction (status data is untouched everywhere else);
-tapping a row opens that patient's profile. **On mobile
+before the name, and the columns are **Patient | Address**,
+both sortable on click — Address shows the full address
+(street, line 2, city, state, ZIP) and sorts by street, then
+city. The Zone, Status, and Clinician columns were removed
+from the table at Jake's direction (status data is untouched
+everywhere else), and the Age/Sex column was removed
+2026-11-01 (also Jake — age/sex now appears only on the
+profile header, and only when recorded); tapping a row opens
+that patient's profile. **On mobile
 (≤720px; 2026-10-31, locally built) the table narrows to
-Patient | Address | (call)**: the Age/Sex column hides, the
+Patient | Address | (call)**: the
 Address cell shows a Navigation directions icon instead of
 the address text (same free Google Maps directions URL as
 the profile; no icon when there is nothing to navigate to),
@@ -82,7 +85,7 @@ stay; ZONE_GUIDE still powers the guide elsewhere). The
 **Dashboard overview no longer has a "Today's schedule" panel**
 (removed 2026-10-30, locally built) — the overview layout holds
 just Urgent triage at full width; the "Today's visits (demo)"
-stat card is unchanged. The **Patient List likewise no
+stat card is unchanged. The **Patients list likewise no
 longer renders the "Schedule — today" day-calendar aside**
 (removed 2026-10-30, locally built): the list section uses
 the single-column layout and the patient table spans the
@@ -93,15 +96,18 @@ zone classifies attention only…") is also removed (2026-10-30,
 locally built) — nothing replaces it. The Patient Profile has **no patient
 selector panel** (removed 2026-10-30, locally built): a plain
 "Patient Profile" heading sits above the card, which spans the
-full width — switching patients happens from the Patient List
+full width — switching patients happens from the Patients
 tab (row click → profile). The Patient sidebar submenu
 likewise no longer carries a "Patient Profile" entry (removed
-2026-10-30, locally built) — Patient List / Add Patient /
+2026-10-30, locally built) — Patients / Add Patient /
 Patients Map only; the profile view itself is unchanged. Displayed patient names carry **no
 honorific title** (`fullName()` composes first/middle/last/
 suffix only; the stored `title` field is unchanged). The Patient Profile is deliberately slim: the
 header line shows a compact "74/F" (exact age from DOB + sex
-initial) · Zone (no status word — status is the color bar under
+initial; the stored `age` column is the fallback when there is
+no DOB, 2026-11-01) · Zone — and the age/sex segment is
+omitted entirely when the patient has neither an age nor a
+sex recorded (2026-11-01, Jake) (no status word — status is the color bar under
 the header: green = active, amber = on hold, red = discharged,
 color only, no text); the alert/note line is not shown on the
 card; the header carries the full name (plus one "Agency: …"
@@ -119,10 +125,13 @@ or delete confirm is open). The button is **icon-only (a
 Pencil) since 2026-10-31** — `title`/`aria-label` keep the
 "Edit patient" name; the Edit form's own "Edit patient"
 heading is unchanged. On the **Add Patient form, Date of
-birth and Sex are required** (2026-10-30): marked *, validated
-client-side with an inline error naming the field, and enforced
-by the API (`DOB_REQUIRED` / `SEX_REQUIRED`); editing is
-unaffected. The check-in/
+birth and Sex are OPTIONAL** (2026-11-01, Jake — they were
+required 2026-10-30 → 2026-11-01, marked *, validated
+client-side, and enforced by the API's retired
+`DOB_REQUIRED` / `SEX_REQUIRED`). Both Add and Edit forms
+carry an **Age (if birth date unknown)** number field writing
+the stored `age` column, used for display only when the
+patient has no usable DOB. The check-in/
 review/clinician details grid and the Care/consent, Emergency
 contact, and Billing sections are not shown in the profile UI —
 the data, API fields, and Edit form fields are unchanged.
@@ -244,7 +253,7 @@ restrictions, not by secrecy).
   Reactivate, with no Patients button and no patients section.
   For active clinicians it toggles an inline section on the
   card listing the clinician's ACTIVE assigned patients as a
-  compact table in the Patient List table's styling — a single
+  compact table in the Patients table's styling — a single
   Full name column only (the patient's full/display name as
   shown on their profile, e.g. "Rosa Delgado"; no Zone column,
   no Age/Sex column, and no zone dot — Zone and Age/Sex were
@@ -305,7 +314,7 @@ restrictions, not by secrecy).
 - **Sidebar header** (2026-10-31, locally built): the sidebar
   has no search bar anymore — the search box that sat at its
   top is removed, and patient search lives only on the
-  Patient List page (same shared `query` state; the
+  Patients page (same shared `query` state; the
   `.sidebar-search` CSS rules remain, unused). The
   collapse/expand chevron now shares one row with the
   **Main Menu** group label (`.sidebar-head` flex row —
@@ -579,8 +588,9 @@ restrictions, not by secrecy).
   never uploaded; only confirmed rows are sent, one by one,
   through `createPatient` / `createStaff`. **Preview contract:**
   nothing saves before the preview — every row shows a status:
-  patients get Ready / Missing required (first name, last name,
-  date of birth, sex are ALL required) / Possible duplicate
+  patients get Ready / Missing required (first and last name
+  only — date of birth and sex became optional 2026-11-01 and
+  are never flagged) / Possible duplicate
   (exact first+last match against existing patients, DOB match
   noted); staff get Ready / Missing required (email, first,
   last) / Already on the team / Duplicate in file. Ready rows

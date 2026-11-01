@@ -471,35 +471,39 @@ async function main() {
     await pool.query('UPDATE patients SET agency_id = NULL WHERE agency_id = $1', [agencyId]);
     await pool.query("DELETE FROM agencies WHERE license_number = 'E2E-AG-1'");
 
-    // 11c. DOB + SEX REQUIRED ON CREATE (Jake, 2026-10-30).
-    // Create-only scope: PUT/edit is unchanged.
-    console.log('11c. dob/sex required on create');
+    // 11c. DOB + SEX OPTIONAL ON CREATE + age fallback (Jake,
+    // 2026-11-01 — reverses the 2026-10-30 required rule; the
+    // CSV import must not block rows lacking a birthday/gender).
+    console.log('11c. dob/sex optional on create; age fallback');
     let r3 = await postPatient({ fname: 'Req', lname: 'NoDob', sex: 'Female' });
-    check('POST without DOB is 400 DOB_REQUIRED',
-      r3.res.status === 400 && r3.json.code === 'DOB_REQUIRED',
+    check('POST without DOB is 201 (DOB optional)',
+      r3.res.status === 201 && r3.json.date_of_birth === null,
       `got ${r3.res.status}/${r3.json && r3.json.code}`);
-    r3 = await postPatient({ fname: 'Req', lname: 'EmptyDob', date_of_birth: '', sex: 'Female' });
-    check('POST with empty DOB is 400 DOB_REQUIRED',
-      r3.res.status === 400 && r3.json.code === 'DOB_REQUIRED');
-    r3 = await postPatient({ fname: 'Req', lname: 'NoSex', date_of_birth: '1960-05-05' });
-    check('POST without sex is 400 SEX_REQUIRED',
-      r3.res.status === 400 && r3.json.code === 'SEX_REQUIRED',
-      `got ${r3.res.status}/${r3.json && r3.json.code}`);
-    r3 = await postPatient({
-      fname: 'Req', lname: 'UnknownSex', date_of_birth: '1960-05-05', sex: 'Unknown',
-    });
-    check('POST with both (sex "Unknown" counts as provided) is 201',
-      r3.res.status === 201, `got ${r3.res.status}`);
     const reqId = r3.json.id;
-    // PUT without DOB/sex still succeeds (create-only scope):
-    // clear both via SQL (a record predating the rule), then edit.
-    await pool.query(
-      'UPDATE patients SET date_of_birth = NULL, sex = NULL WHERE id = $1',
-      [reqId],
-    );
-    r3 = await putPatient(reqId, { notes: 'edit without dob/sex' });
-    check('PUT without DOB/sex still succeeds (create-only rule)',
-      r3.res.status === 200 && r3.json.date_of_birth === null && r3.json.sex === null,
+    r3 = await postPatient({ fname: 'Req', lname: 'EmptyDob', date_of_birth: '', sex: 'Female' });
+    check('POST with empty-string DOB is 201 and stores NULL',
+      r3.res.status === 201 && r3.json.date_of_birth === null,
+      `got ${r3.res.status}`);
+    r3 = await postPatient({ fname: 'Req', lname: 'NoSex', date_of_birth: '1960-05-05' });
+    check('POST without sex is 201 (sex optional)',
+      r3.res.status === 201 && r3.json.sex === null,
+      `got ${r3.res.status}/${r3.json && r3.json.code}`);
+    r3 = await postPatient({ fname: 'Req', lname: 'AgeOnly', age: 74 });
+    check('POST with age and no DOB/sex is 201 and returns age',
+      r3.res.status === 201 && r3.json.age === 74,
+      `got ${r3.res.status}/${r3.json && r3.json.age}`);
+    r3 = await postPatient({ fname: 'Req', lname: 'BadAge', age: 200 });
+    check('POST with age 200 is 400',
+      r3.res.status === 400, `got ${r3.res.status}`);
+    r3 = await postPatient({ fname: 'Req', lname: 'StringAge', age: '74' });
+    check('POST with string age is 400',
+      r3.res.status === 400, `got ${r3.res.status}`);
+    // PUT round-trip: age is writable on edit; the NoDob
+    // patient's DOB stays NULL and its sex is untouched.
+    r3 = await putPatient(reqId, { age: 65, notes: 'edit without dob/sex' });
+    check('PUT sets age; DOB stays null, sex untouched',
+      r3.res.status === 200 && r3.json.age === 65
+        && r3.json.date_of_birth === null && r3.json.sex === 'Female',
       `got ${r3.res.status}`);
 
     // 12. REAL auth fails closed without a token

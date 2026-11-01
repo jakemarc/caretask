@@ -46,7 +46,7 @@ an `ALLOWED_EMAILS` account.
 |---|---|
 | `GET /health` | open; liveness |
 | `GET /patients?q=&status=` | q matches fname/lname/preferred_name/email (ILIKE) |
-| `POST /patients` | create (NOT PIN-gated — intake is a front-desk act). Requires `date_of_birth` and `sex` (built locally 2026-10-30): missing/empty DOB → 400 `DOB_REQUIRED`; missing/empty sex → 400 `SEX_REQUIRED`. Create-only — PUT/edit does not enforce them. Any recorded sex value counts, including `"Unknown"`. |
+| `POST /patients` | create (NOT PIN-gated — intake is a front-desk act). Requires only `fname` + `lname`. `date_of_birth` and `sex` are OPTIONAL (Jake, 2026-11-01 — they were required 2026-10-30 → 2026-11-01 with 400 `DOB_REQUIRED` / `SEX_REQUIRED`; those codes are retired). An empty-string `date_of_birth` normalizes to NULL; a provided one must still be YYYY-MM-DD. Accepts the stored-age fallback `age` (integer 0–130, else 400) for patients whose birth date is unknown. |
 
 Patient agency fields (built locally 2026-10-30, not yet
 deployed): create/update accept `agency_id` (integer; must

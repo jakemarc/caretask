@@ -58,6 +58,9 @@ export interface PersonUnderCare {
   suffix?: string | null;
   preferredName?: string | null;
   dateOfBirth?: string | null;
+  // Stored age (years) — only consulted when dateOfBirth is
+  // unset (schema-patients-age.sql).
+  age?: number | null;
   sex?: string | null;
   race?: string | null;
   ethnicity?: string | null;
