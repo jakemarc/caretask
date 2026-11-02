@@ -6,6 +6,23 @@ built and verified but not deployed.
 
 ## 2026-11-02
 
+- **Mobile Patients title fix — Live 2026-11-02 (deploy-21:
+  dashboard bundle `index-jIXS557U.js`, deployment
+  https://342eda86.marcinnotech-app.pages.dev, verified —
+  Cloudflare API reports it as the canonical production
+  deployment and the deployment URL serves the new bundle;
+  the deploy-20 token was reused, no new token minted).**
+  Jake's phone screenshot showed the deploy-19 mobile Patients
+  view working against his real imported census ("38 active
+  patients", no API banner — deploy-20 verified in real use)
+  but the "Patients" title missing: the page head rendered
+  after the count note in flow, landing at ~90–125px, hidden
+  behind the fixed floating search; only the Add Patient
+  button's edge peeked out. Fix (mobile ≤720px CSS only): the
+  list panel is now a flex column, the page head is ordered
+  first with a 118px top margin so the stack clears the fixed
+  search — title row (with a reachable Add Patient button),
+  then the count note, then the cards.
 - **Auth diagnostics + dashboard retry — Live 2026-11-02
   (API: surgical in-place edit on the VM, no deployment URL;
   dashboard deploy-20: bundle `index-dsXGun7Q.js`, deployment

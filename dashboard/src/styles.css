@@ -3326,7 +3326,24 @@ label.contact-picker-row {
 
   .mobile-count-note {
     display: block;
-    margin: 64px 0 10px;
+    margin: 0 0 10px;
+  }
+
+  /* Title fix (Jake, 2026-11-02): the page head rendered AFTER
+     the count note in flow, so the "Patients" title and the Add
+     Patient button sat at ~90-125px — hidden behind the fixed
+     floating search (top:74px, ~52px tall). The panel becomes a
+     flex column, the head is ordered first, and its top margin
+     (118px) drops the whole stack below the search: title row,
+     then the count, then the cards. */
+  .patient-list-panel {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .patient-list-panel .list-page-head {
+    order: -1;
+    margin-top: 118px;
   }
 
   .patient-cards {
