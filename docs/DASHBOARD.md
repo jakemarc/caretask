@@ -696,6 +696,187 @@ restrictions, not by secrecy).
   submit / manager review / print window) is gone; legacy
   reports remain readable through the API only.
 
+## Duplicate review + mark-as-duplicate (Live 2026-11-02, deploy-28)
+
+- **Patients tab** renders `MergeReview` (src/components/MergeReview.tsx)
+  when the API is connected and marks or merges exist: each marked
+  pair shows side-by-side summaries with a "Keep this record" radio
+  (default = the more complete record), a manager-gated **Merge
+  duplicates** button, and **Not duplicates** (dismiss, any
+  clinician). Below, **Recent merges** lists what moved and offers
+  **Undo** (manager-gated). The card refetches whenever the Patients
+  tab becomes visible.
+- **Patient Profile** (connected mode) carries a **Mark as
+  duplicate…** button under the Manage-list actions: a search picker
+  over the other patients creates the pair mark; the note under it
+  points to the Patients list for the review. The merge moves the
+  loser's appointments/documents/messages/mileage to the survivor;
+  if the open profile was the retired record, the selection follows
+  to the survivor (Dashboard `handleMerged`).
+
+## Clinician tasks / reminders (Live 2026-11-02, deploy-28)
+
+- `TasksPanel` (src/components/TasksPanel.tsx) + `src/lib/tasksApi.ts`.
+  **Dashboard overview** gains a "My reminders" panel (connected
+  mode): an Overdue / Due today strip, the open list ordered
+  overdue → today → upcoming → undated (checkbox toggles done,
+  patient chip opens the profile, × removes), an add row (title +
+  optional due date + optional patient link), and a Show done
+  expander. **Patient Profile** gains a Reminders card (same
+  component, patient variant) listing that patient's reminders
+  with a pre-linked add row. Due dates are date-granular (stored
+  as 9 AM local); tasks are the clinician's own — the API is
+  owner-scoped, so no one else's list ever renders.
+
+## CSV import: batch agency + status (Live 2026-11-02, deploy-28)
+
+The patients CSV import preview gains an **"Apply to all rows"**
+bar (Google Contacts label model): an AgencyPicker + a Status
+select (Active / On hold / Discharged) that stamp every row in
+the preview; each row also carries its own Agency select (the
+active directory, display names) and Status select as overrides.
+Rows save with their agency_id / agency_name_text / status —
+createPatient already accepted all three, so this is
+dashboard-only. Staff import is unchanged.
+
+## Calendar: agency badges + filter (Live 2026-11-02, deploy-28)
+
+Appointments carry no agency of their own — they inherit it
+through the patient (`MapPatientLike` now carries agencyId /
+agencyName via `toMapPatient`). The calendar toolbar gains an
+**agency filter** (All agencies / each agency present among the
+patients / No agency) that filters all four views (month, week,
+agenda, map; blocks without a patient always show), and each
+appointment shows its agency: a suffix on month chips, and in the
+week/agenda meta lines. Caveat: it can only distinguish what's
+assigned — patients with no agency read as "No agency" (the CSV
+batch agency assignment is the bulk fix).
+
+## Mobile: Muse-style reveal menu + profile cleanup (Live 2026-11-02, deploy-28)
+
+- **Menu (≤720px, not force-desktop):** the sidebar now rests
+  UNDER the page at min(320px, 85vw) (visibility-toggled); opening
+  the menu adds `.menu-open` to the shell and the page —
+  `.dashboard-body`, `.mobile-topbar`, the fabs, and the pill —
+  slides right by the same width (0.34s ease; the pill's -50%
+  centering is preserved by calc). The old scrim is now a
+  transparent tap-to-close veil over the exposed page sliver with
+  an inset shadow as the page's edge. Menu rows are 16px with
+  13px padding. (In-body fixed elements — floating search, profile
+  vpill — ride the body's transform.)
+- **Profile cleanup:** the mobile top bar title for the profile is
+  "Patient Profile" (was the patient's name); `.profile-heading`
+  is hidden at phone widths (desktop keeps it); the Manage-list
+  title and description are GONE, and the status buttons (+ the
+  Mark-as-duplicate block) now sit below Contact and above
+  Appointments on all layouts.
+
+## Mobile profile swipe (Live 2026-11-02, deploy-28)
+
+At phone widths the profile card accepts a horizontal swipe
+(|dx| > 56px, clearly horizontal) — left for the next patient,
+right for the previous — following the Patients list's visible
+order (`mobilePeople`: sorted, status filter/search applied; no
+wrap at the ends; disabled while editing). The card remounts per
+patient with a slide-in animation from the swipe side, and a
+mobile-only "3 of 12" position row with ‹ › steppers sits above
+it.
+
+## Calling app setting (Live 2026-11-02, deploy-28)
+
+Settings gains a **Calling app** card (Phone / Google Voice /
+WhatsApp / FaceTime). The choice persists on-device
+(localStorage `caretask-calling-app`) and every call href in the
+app — patient cards, profile pill + phone rows, staff cards,
+contacts, agency phones — is built by `callingHref()` in
+lib/phone.ts. Doximity is excluded: its number-prefill handoff
+exists only for native integrations (Haiku/Canto, its Android
+library), no web link hands it a number, and Dialer eligibility
+does not include PTs.
+
+## Add patient by photo (Live 2026-11-02, deploy-28)
+
+Jake chose the FREE on-device reader (cloud vision not used).
+Add Patient gains an **Add by photo** button →
+`PhotoIntake` (src/components/PhotoIntake.tsx): camera/file pick
+(`capture="environment"`), Tesseract.js (lazy chunk) reads the
+image **in the browser on the device** — the photo is never
+uploaded and is discarded when the panel closes (the OCR engine
++ English data download once from a CDN; that's program code,
+not the photo). `parseIntakeText` (src/lib/photoExtract.ts)
+pulls labeled fields first (name, DOB, sex, cell/home phones,
+email, address, referring physician) with conservative pattern
+fallbacks; the review panel lists what was found plus the raw
+reader output. "Use these details" applies the fields through
+the existing `applyContactToPatientForm` — the normal duplicate
+check runs and nothing saves from the photo panel itself.
+Parser verified against a labeled referral sample (all fields
+exact; the recent referral date is not mistaken for the DOB).
+
+## Add Patient form cleanup + desktop patients table (Live 2026-11-02, deploy-28)
+
+At Jake's direction: the Add form's **Google Contacts import
+button is removed** (the picker still serves Clinician staff
+import); first/last name placeholders are "e.g. Jake" / "e.g.
+Marc"; parenthetical label text is gone ("Age", "Agency"); the
+**Agency field sits above Notes**; the AgencyPicker's scope line
+under the dropdown is now a short "Search all Illinois" /
+"Limit to Chicagoland" action and "Not listed" (same functions);
+and tapping the mobile top bar's **+** now also clears the
+desktop-view override, so the form always opens in the mobile
+layout from mobile chrome. On desktop, the **Patients table
+scrolls inside one screen** (`patients-table-scroll`,
+max-height calc(100dvh − 230px), sticky header; same under
+force-desktop) — mobile cards are unaffected.
+
+## Calendar month markers (Live 2026-11-02, deploy-28)
+
+On phone widths the month grid trades its text chips for
+**color bars**: each day cell shows up to 3 thin bars in the
+visit categories' own colors plus a "+N" count, and a legend
+under the grid names the visit types present in the filtered
+set. Tapping a day still lists the appointments (with names) in
+the day list below. Desktop month view keeps its chips.
+
+## Dashboard overview: one screen + three cards (Live 2026-11-02, deploy-28)
+
+Jake's redesign (mockup round, 2026-11-02). The old five demo
+stat cards and the Urgent triage panel are gone; the overview is
+now three cards over the reminders and news panels, and at
+desktop widths the whole overview fits **one screen** — the
+page never scrolls; the panels flex to the leftover height and
+their lists scroll inside (`.overview-screen`). Below desktop
+widths everything stacks and the page scrolls normally.
+
+- **Clock card** — live date and time (refreshes every 20s) and
+  the current weather for Hickory Hills from Open-Meteo (no API
+  key; WMO weather code mapped to a label + a lucide icon;
+  refetched every 30 minutes; a failed fetch reads "Weather
+  unavailable"). The card's background gradient shifts with the
+  **season and the time of day** (24 season × daypart
+  combinations; night goes deep navy with light text) —
+  `src/lib/overviewClock.ts`.
+- **Appointments today** — the count of today's visit-type
+  appointments (provider blocks excluded; cancelled / no-show
+  excluded; demo `daySchedule` in fallback mode). The card's
+  background follows the count: 1–3 green, 4 yellow, 5–7 red,
+  8+ deep red; 0 stays plain.
+- **Total patients** — the patient count (`people.length`;
+  works in connected and fallback modes).
+
+## PT & Home Health News card (Live 2026-11-02, deploy-28)
+
+`NewsCard` on the overview shows the newest headlines from the
+API's `GET /news` (see API.md): shortened title + short
+description, source and relative time, first 4 expanded in
+place ("+ N more headlines" scrolls inside the card). **Topics
+are chosen in Settings → "News feed topics"**
+(`NewsTopicsSettings`; localStorage `caretask-news-topics`;
+defaults: physical therapy, home health, and APTA on;
+Medicare/CMS and research off). The card and the Settings
+checkboxes stay in sync via a window event, so a topic change
+applies without reopening the overview.
+
 ## Build & deploy
 
 ```bash

@@ -28,6 +28,10 @@ export interface MapPatientLike {
   postalCode?: string | null;
   latitude?: number | null;
   longitude?: number | null;
+  // Agency the patient belongs to (appointments inherit it —
+  // calendar agency badges/filter, 2026-11-02).
+  agencyId?: number | null;
+  agencyName?: string | null;
 }
 
 export interface PlacedPoint {
@@ -62,6 +66,8 @@ export function toMapPatient(p: PersonUnderCare): MapPatientLike {
     postalCode: p.postalCode,
     latitude: p.latitude,
     longitude: p.longitude,
+    agencyId: p.agencyId ?? null,
+    agencyName: p.agencyName ?? p.agencyNameText ?? null,
   };
 }
 

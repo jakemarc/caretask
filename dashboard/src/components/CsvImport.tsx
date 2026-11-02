@@ -33,14 +33,18 @@ import {
 import {
   createPatient,
   createStaff,
+  fetchAgencies,
   isRoleRejection,
   listPatients,
   listUsers,
+  type ApiAgency,
   type ApiUser,
   type NewApiPatient,
+  type PatientStatus,
   type StaffInput,
 } from "../lib/patientApi";
 import { isManagerRole, useMyStaff } from "../lib/useMyRole";
+import AgencyPicker from "./AgencyPicker";
 
 interface Props {
   user: User;
@@ -61,6 +65,13 @@ interface PreviewRow {
   detail: string;
   checked: boolean;
   result?: string;
+  // Patients flow only: the agency + status this row will be
+  // saved with. Set in bulk by the batch controls at the top of
+  // the preview (Jake, 2026-11-02 — the Google Contacts label
+  // model), overridable per row.
+  agencyId: number | null;
+  agencyText: string | null;
+  patientStatus: PatientStatus;
 }
 
 interface ImportSummary {
@@ -75,7 +86,10 @@ const blankToNull = (s: string): string | null => {
   return t ? t : null;
 };
 
-function buildPatientInput(contact: CsvContact): NewApiPatient {
+function buildPatientInput(
+  contact: CsvContact,
+  row: PreviewRow,
+): NewApiPatient {
   const c = contact.candidate;
   return {
     title: blankToNull(contact.title),
@@ -94,9 +108,12 @@ function buildPatientInput(contact: CsvContact): NewApiPatient {
     phone_home: blankToNull(c.phoneHome),
     phone_cell: blankToNull(c.phoneCell),
     email: blankToNull(c.email),
-    // Same defaults as the Add Patient form.
+    // Zone default matches the Add Patient form; the STATUS and
+    // agency come from the row (batch controls + per-row override).
     zone: "green",
-    status: "active",
+    status: row.patientStatus,
+    agency_id: row.agencyId,
+    agency_name_text: row.agencyText,
     occupation: blankToNull(c.occupation),
     ...(c.note ? { notes: c.note } : {}),
   };
@@ -137,6 +154,13 @@ export default function CsvImport({
   const [saving, setSaving] = useState(false);
   const [summary, setSummary] = useState<ImportSummary | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  // Batch agency/status (patients flow): the agency directory for
+  // the per-row selects, loaded once; the batch picker + status
+  // apply to every row, per-row selects override.
+  const [agencies, setAgencies] = useState<ApiAgency[] | null>(null);
+  const [batchAgencyId, setBatchAgencyId] = useState<number | null>(null);
+  const [batchAgencyText, setBatchAgencyText] = useState<string | null>(null);
+  const [batchStatus, setBatchStatus] = useState<PatientStatus>("active");
 
   if (!apiConnected) {
     return (
@@ -158,6 +182,56 @@ export default function CsvImport({
     setRows(null);
     setDupCheckFailed(false);
     setSummary(null);
+    setBatchAgencyId(null);
+    setBatchAgencyText(null);
+    setBatchStatus("active");
+    if (target === "patients" && agencies === null) {
+      fetchAgencies(user, { active: true })
+        .then(setAgencies)
+        .catch(() => setAgencies([]));
+    }
+  }
+
+  function applyBatchAgency(sel: {
+    agencyId: number | null;
+    agencyNameText: string | null;
+  }) {
+    setBatchAgencyId(sel.agencyId);
+    setBatchAgencyText(sel.agencyNameText);
+    setRows((prev) =>
+      (prev ?? []).map((r) => ({
+        ...r,
+        agencyId: sel.agencyId,
+        agencyText: sel.agencyNameText,
+      })),
+    );
+  }
+
+  function applyBatchStatus(status: PatientStatus) {
+    setBatchStatus(status);
+    setRows((prev) =>
+      (prev ?? []).map((r) => ({ ...r, patientStatus: status })),
+    );
+  }
+
+  function setRowAgency(key: string, value: string) {
+    setRows((prev) =>
+      (prev ?? []).map((r) => {
+        if (r.key !== key) return r;
+        if (value === "") return { ...r, agencyId: null, agencyText: null };
+        if (value.startsWith("text:"))
+          return { ...r, agencyId: null, agencyText: value.slice(5) };
+        return { ...r, agencyId: Number(value.slice(3)), agencyText: null };
+      }),
+    );
+  }
+
+  function setRowStatus(key: string, status: PatientStatus) {
+    setRows((prev) =>
+      (prev ?? []).map((r) =>
+        r.key === key ? { ...r, patientStatus: status } : r,
+      ),
+    );
   }
 
   function closeFlow() {
@@ -188,6 +262,9 @@ export default function CsvImport({
         key: `${c.resourceName}-${i}`,
         contact,
         checked: false,
+        agencyId: null,
+        agencyText: null,
+        patientStatus: "active" as PatientStatus,
       };
       if (target === "patients") {
         const missing = missingPatientFields(contact);
@@ -332,7 +409,7 @@ export default function CsvImport({
       try {
         const person = await createPatient(
           user,
-          buildPatientInput(row.contact),
+          buildPatientInput(row.contact, row),
         );
         created.push(person);
         results.set(row.key, "Imported");
@@ -524,6 +601,42 @@ export default function CsvImport({
                 {counts.missing > 0 &&
                   ` · ${counts.missing} missing required fields`}
               </p>
+              {flow === "patients" && (
+                <div className="csv-batch">
+                  <span className="csv-batch-label">Apply to all rows:</span>
+                  <div className="csv-batch-agency">
+                    <AgencyPicker
+                      user={user}
+                      apiConnected={apiConnected}
+                      agencyId={batchAgencyId}
+                      agencyNameText={batchAgencyText}
+                      onChange={(sel) =>
+                        applyBatchAgency({
+                          agencyId: sel.agencyId,
+                          agencyNameText: sel.agencyNameText ?? null,
+                        })
+                      }
+                      patientCity=""
+                      resetKey={fileName || "csv-batch"}
+                    />
+                  </div>
+                  <div className="csv-batch-status">
+                    <span>Status</span>
+                    <select
+                      value={batchStatus}
+                      onChange={(e) =>
+                        applyBatchStatus(e.target.value as PatientStatus)
+                      }
+                      disabled={saving}
+                      aria-label="Status for all rows"
+                    >
+                      <option value="active">Active</option>
+                      <option value="hold">On hold</option>
+                      <option value="discharged">Discharged</option>
+                    </select>
+                  </div>
+                </div>
+              )}
               <div className="csv-table-wrap">
                 <table className="data-table">
                   <thead>
@@ -545,6 +658,8 @@ export default function CsvImport({
                           <th>Sex</th>
                           <th>Email</th>
                           <th>Phone</th>
+                          <th>Agency</th>
+                          <th>Save as</th>
                         </>
                       ) : (
                         <>
@@ -577,6 +692,59 @@ export default function CsvImport({
                               <td>{c.sex || "—"}</td>
                               <td>{c.email || "—"}</td>
                               <td>{c.phoneCell || c.phoneHome || "—"}</td>
+                              <td>
+                                <select
+                                  className="csv-row-select"
+                                  value={
+                                    r.agencyText
+                                      ? `text:${r.agencyText}`
+                                      : r.agencyId != null
+                                        ? `id:${r.agencyId}`
+                                        : ""
+                                  }
+                                  onChange={(e) =>
+                                    setRowAgency(r.key, e.target.value)
+                                  }
+                                  disabled={
+                                    saving || r.result === "Imported"
+                                  }
+                                  aria-label={`Agency for ${c.displayName}`}
+                                >
+                                  <option value="">No agency</option>
+                                  {r.agencyText && (
+                                    <option value={`text:${r.agencyText}`}>
+                                      {r.agencyText} (typed)
+                                    </option>
+                                  )}
+                                  {(agencies ?? []).map((a) => (
+                                    <option key={a.id} value={`id:${a.id}`}>
+                                      {a.display_name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </td>
+                              <td>
+                                <select
+                                  className="csv-row-select"
+                                  value={r.patientStatus}
+                                  onChange={(e) =>
+                                    setRowStatus(
+                                      r.key,
+                                      e.target.value as PatientStatus,
+                                    )
+                                  }
+                                  disabled={
+                                    saving || r.result === "Imported"
+                                  }
+                                  aria-label={`Status for ${c.displayName}`}
+                                >
+                                  <option value="active">Active</option>
+                                  <option value="hold">On hold</option>
+                                  <option value="discharged">
+                                    Discharged
+                                  </option>
+                                </select>
+                              </td>
                             </>
                           ) : (
                             <>

@@ -6,6 +6,74 @@ built and verified but not deployed.
 
 ## 2026-11-02
 
+- **The build queue ships — Live 2026-11-02 (deploy-28: API
+  files + 2 migrations on the VM + dashboard bundle
+  `index-DiCXGtUH.js`, deployment
+  https://c675c14f.marcinnotech-app.pages.dev, verified —
+  Cloudflare API canonical deployment matches, the deployment
+  URL serves the new bundle, main-domain asset 200, API
+  /health green, the three new routes answer 401 without a
+  token, and all 8 API files sha256-matched after upload).**
+  Jake said "run the queue" — all eight queued items plus the
+  same-day follow-ons and the afternoon dashboard round ship
+  as one release:
+  - **Patient merge** (API + dashboard): duplicate marks any
+    clinician can place, a Patients-tab review card, and a
+    manager-gated merge that re-points appointments,
+    documents, messages, and mileage to the survivor (the
+    exact row ids are recorded, so Undo re-points exactly
+    those back and restores the loser), gap-fills empty
+    survivor fields, and soft-deletes the loser. Names, zone,
+    status, clinician, consent flags, and ss/license never
+    move.
+  - **Clinician tasks / reminders** (API + dashboard):
+    owner-scoped `clinician_tasks` (another clinician's task
+    id answers 404); "My reminders" on the overview and a
+    Reminders card on the profile. In-app only — no
+    patient-facing reminders.
+  - **CSV import**: the patients preview gains an "Apply to
+    all rows" agency + status bar and per-row agency/status
+    selects; rows save with agency and status stamped.
+  - **Calendar**: agency filter + agency names on month chips
+    and week/agenda meta lines; on the mobile month grid the
+    chips become up-to-3 color bars by visit type with a
+    legend under the grid.
+  - **Mobile**: Muse-style reveal menu (the sidebar rests
+    under the page; the page slides right over it) + profile
+    cleanup (top bar reads "Patient Profile"; the Manage-list
+    block moved below Contact); profile swipe left/right
+    through the Patients list order with a position row, no
+    wrap at the ends.
+  - **Calling app setting**: Settings → Calling app (Phone /
+    Google Voice / WhatsApp / FaceTime) and every Call button
+    follows it. Doximity is excluded — its number handoff is
+    native-integration only and PTs are not Dialer-eligible.
+  - **Add patient by photo**: on-device OCR (Tesseract.js,
+    lazy-loaded chunk) pre-fills the Add form from a referral
+    sheet or card; the photo is read on the device and never
+    uploaded.
+  - **Add form cleanup**: the Google Contacts button is
+    removed from the Add form (the picker still serves
+    Clinician staff import), placeholders read "e.g. Jake" /
+    "e.g. Marc", parenthetical labels are gone, Agency sits
+    above the Note, and the AgencyPicker toggles are shorter.
+    The desktop Patients table scrolls inside one screen
+    with a sticky header.
+  - **Dashboard overview rebuilt to one screen** (desktop):
+    a clock card (live time + Open-Meteo weather for Hickory
+    Hills; the background shifts with season and time of
+    day), an appointments-today card (bands: 1–3 green,
+    4 yellow, 5–7 red, 8+ deep red), and a total-patients
+    card over the reminders and news panels; the demo stat
+    cards and the Urgent triage panel are removed.
+  - **PT & Home Health News card**: server-aggregated RSS
+    via `GET /news` with shortened titles/descriptions;
+    topics are chosen in Settings → News feed topics
+    (defaults: physical therapy, home health, APTA).
+  Suites: the full API battery is green on a fresh database
+  (11 DB suites, incl. merge 27 and tasks 22, plus the news
+  suite 10/10); the dashboard production build is green.
+
 - **Expenses simplified → mileage day log — Live
   2026-11-02 (deploy-27: API migration + routes on the VM +
   dashboard bundle `index-zT2OwENT.js`, deployment

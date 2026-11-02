@@ -520,6 +520,110 @@ export async function restorePatient(
   return toPersonUnderCare(row);
 }
 
+// ── Patient merge (duplicate records) ────────────────────────────
+// Mark a suspected-duplicate pair → review queue → a manager merges
+// (linked rows re-point to the survivor, the loser is retired, the
+// merge is undoable). API: routes/patientMerge.js.
+
+export interface MergePatientSummary {
+  id: string;
+  name: string;
+  fname: string | null;
+  lname: string | null;
+  date_of_birth: string | null;
+  age: number | null;
+  sex: string | null;
+  zone: string | null;
+  status: string | null;
+  address: string | null;
+  phone_cell: string | null;
+  phone_home: string | null;
+  email: string | null;
+  agency_id: number | null;
+  agency_name_text: string | null;
+  deleted: boolean;
+}
+
+export interface MergeMark {
+  patient_low: string;
+  patient_high: string;
+  created_by: string;
+  created_at: string;
+  patient_a: MergePatientSummary;
+  patient_b: MergePatientSummary;
+}
+
+export interface MergeRecord {
+  id: number;
+  survivor_id: string;
+  loser_id: string;
+  survivor_name: string;
+  loser_name: string;
+  merged_by: string;
+  created_at: string;
+  moved: {
+    appointments: number;
+    documents: number;
+    messages: number;
+    mileage_entries: number;
+  };
+  undone_at: string | null;
+  undone_by: string | null;
+}
+
+export async function fetchMergeMarks(user: User): Promise<MergeMark[]> {
+  const data = (await apiFetch(user, "/patient-merge/marks")) as {
+    marks: MergeMark[];
+  };
+  return data.marks;
+}
+
+export async function markDuplicatePair(
+  user: User,
+  patientId: string,
+  otherId: string,
+): Promise<void> {
+  await apiFetch(user, "/patient-merge/mark", {
+    method: "POST",
+    body: JSON.stringify({ patient_id: patientId, other_id: otherId }),
+  });
+}
+
+export async function dismissMergeMark(
+  user: User,
+  patientId: string,
+  otherId: string,
+): Promise<void> {
+  await apiFetch(user, "/patient-merge/mark/dismiss", {
+    method: "POST",
+    body: JSON.stringify({ patient_id: patientId, other_id: otherId }),
+  });
+}
+
+export async function fetchMerges(user: User): Promise<MergeRecord[]> {
+  const data = (await apiFetch(user, "/patient-merge")) as {
+    merges: MergeRecord[];
+  };
+  return data.merges;
+}
+
+// ROLE-GATED (manager/admin) — the API answers 403 ROLE_REQUIRED
+// for anyone else; isRoleRejection() recognizes it.
+export async function mergePatients(
+  user: User,
+  survivorId: string,
+  loserId: string,
+): Promise<void> {
+  await apiFetch(user, "/patient-merge", {
+    method: "POST",
+    body: JSON.stringify({ survivor_id: survivorId, loser_id: loserId }),
+  });
+}
+
+export async function undoMerge(user: User, mergeId: number): Promise<void> {
+  await apiFetch(user, `/patient-merge/${mergeId}/undo`, { method: "POST" });
+}
+
 export interface ApiAuditEntry {
   id: string;
   patient_id: string;

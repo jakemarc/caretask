@@ -9,7 +9,8 @@ import {
   type ApiAgency,
 } from "../lib/patientApi";
 import { isManagerRole, useMyStaff } from "../lib/useMyRole";
-import { telHref } from "../lib/phone";
+import {
+  callingHref, telHref } from "../lib/phone";
 
 // Agency tab: the searchable statewide IDPH directory. Data
 // comes from the CareTask API (agencies table, synced from the
@@ -280,7 +281,7 @@ export default function AgencyView({
             <div>
               <span className="agency-field-label">Phone</span>
               {a.phone && telHref(a.phone) ? (
-                <a href={telHref(a.phone) ?? "#"}>{a.phone}</a>
+                <a href={callingHref(a.phone) ?? "#"}>{a.phone}</a>
               ) : (
                 "—"
               )}
@@ -628,7 +629,7 @@ export default function AgencyView({
                           {a.phone && telHref(a.phone) ? (
                             <a
                               className="linklike"
-                              href={telHref(a.phone) ?? "#"}
+                              href={callingHref(a.phone) ?? "#"}
                             >
                               {a.phone}
                             </a>

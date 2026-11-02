@@ -198,6 +198,100 @@ row (403 `NO_STAFF_RECORD` otherwise).
   `e2e-expenses-test.js` (45 checks, all passing locally
   2026-11-02).
 
+## Patient merge (routes/patientMerge.js, mounted at /patient-merge) — Live 2026-11-02 (deploy-28)
+
+Duplicate-record handling per contacts-multiagency-spec.md §1.
+Migration `schema-patient-merge.sql` (after schema-mileage-chains.sql):
+`patient_merge_marks` (one open mark per unordered pair; closes via
+deleted_at — no DELETE grant), `patient_merges` (survivor/loser,
+actor, `moved_ids` JSONB with the exact re-pointed row ids,
+undone_at/undone_by), event type `patient_merge` (also added to
+SERVER_EVENTS in lib/eventLog.js).
+
+- `GET /patient-merge/marks` — the review queue: open marks with a
+  summary of both patients (name, DOB/age, sex, zone, status,
+  address, phones, email, agency).
+- `POST /patient-merge/mark` {patient_id, other_id} — any signed-in
+  clinician; idempotent per pair (either order); 400 SAME_PATIENT,
+  404 PATIENT_NOT_FOUND, 409 PATIENT_DELETED.
+- `POST /patient-merge/mark/dismiss` {patient_id, other_id} —
+  closes an open mark; 404 MARK_NOT_FOUND.
+- `POST /patient-merge` {survivor_id, loser_id} — **manager/admin
+  role gate**. One transaction: appointments, documents, messages,
+  and mileage_entries re-point from loser to survivor (ids
+  recorded); the survivor inherits the loser's values ONLY where
+  its own are empty (contact/address/demographic/billing fields;
+  agency as a pair; notes append with a "[Merged from a duplicate
+  record]" marker). Names, zone, status, clinician, consent flags,
+  and ss/drivers_license never move. The loser is soft-deleted and
+  every open mark touching either record closes.
+- `POST /patient-merge/:id/undo` — **manager/admin**. Re-points
+  exactly the recorded ids back, restores the loser, stamps
+  undone_at/by; 409 ALREADY_UNDONE. Field copies into the survivor
+  are NOT reversed (documented behavior — they were copies; the
+  loser kept its originals).
+- `GET /patient-merge` — the 50 most recent merges with per-table
+  moved counts.
+
+Suite: `e2e-patient-merge-test.js` (27 checks; full battery green
+2026-11-02).
+
+## Clinician tasks (routes/tasks.js, mounted at /tasks) — Live 2026-11-02 (deploy-28)
+
+The todo/reminder list (Jake, 2026-11-02). Migration
+`schema-tasks.sql` (after schema-patient-merge.sql):
+`clinician_tasks` (user_id owner, patient_id NULL, title, notes,
+due_at, done_at, soft delete) + event type `task_change` (ids and
+action only — titles/notes never enter the log).
+
+- Tasks are **owner-scoped**: the caller resolves to their active
+  staff record (403 NO_STAFF_RECORD without one); lists and writes
+  only ever touch the caller's tasks, and another clinician's task
+  id answers 404 TASK_NOT_FOUND (existence hiding).
+- `GET /tasks?scope=open|done|all&patient_id=` — open-first
+  ordering (due soonest first, undated last).
+- `POST /tasks` {title, notes?, patient_id?, due_at?} — title
+  required (≤300), patient must exist (400 PATIENT_NOT_FOUND),
+  due_at must parse (400 DUE_INVALID).
+- `PUT /tasks/:id` — field edits; `done: true/false` stamps/clears
+  done_at; `patient_id: null` / `due_at: null` clear the link/due.
+- `DELETE /tasks/:id` — soft delete, 204.
+- **In-app only** — patient-facing reminders remain the separate
+  messaging Phase 3 proposal.
+
+Suite: `e2e-tasks-test.js` (22 checks, all passing 2026-11-02).
+The dashboard half (the overview "My reminders" panel and the
+profile Reminders card) shipped in the same deploy — see
+DASHBOARD.md.
+
+## News feed (routes/news.js, mounted at /news) — Live 2026-11-02 (deploy-28)
+
+Server-side RSS/Atom aggregation for the dashboard's news card,
+so feeds are fetched once per API instance instead of from every
+browser.
+
+- `GET /news?topics=a,b&limit=n` — behind requireAuth. Topics:
+  `physical_therapy`, `home_health`, `apta`, `medicare_cms`,
+  `research`; an unknown topic answers 400 `TOPIC_UNKNOWN`.
+  `limit` clamps to 1–30 (default 12). Response `{items, topics,
+  fetched_at}`; items carry source, title, description, link,
+  and published time.
+- Feeds (lib/newsFeeds.js; overridable wholesale via the
+  `NEWS_FEEDS_JSON` env var): APTA's RSS feed (it carries both
+  the apta and physical_therapy topics), Home Health Care News'
+  home-health and CMS category feeds, and PTJ's Editor's Choice
+  feed (research). CMS publishes no official RSS feed, hence the
+  HHCN CMS category feed.
+- Parsing is a tolerant in-house RSS `<item>` / Atom `<entry>`
+  extractor (entities and CDATA decoded, HTML stripped). Titles
+  trim to at most 110 characters and descriptions to 180, at a
+  word boundary; items dedupe by link and sort newest-first.
+  Each feed is cached in memory for 10 minutes with a 6-second
+  fetch timeout; a failing feed drops out of that response only.
+
+Suite: `e2e-news-test.js` (10 checks against fixture RSS/Atom
+servers — the suite needs no database; all passing 2026-11-02).
+
 ## Role gates (lib/requireRole.js) — replaced the manager-PIN gate 2026-11-02
 
 Jake's decision (2026-11-02): "Remove the PIN — role gates
