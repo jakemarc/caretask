@@ -6,6 +6,20 @@ built and verified but not deployed.
 
 ## 2026-11-02
 
+- **Mobile Patients title DOCKED — Live 2026-11-02 (deploy-22:
+  dashboard bundle `index-Cn9eNyDA.js`, deployment
+  https://5144d7cd.marcinnotech-app.pages.dev, verified —
+  Cloudflare API reports it as the canonical production
+  deployment and the deployment URL serves the new bundle;
+  deploy-20 token reused).** Jake asked for the title docked
+  rather than in-flow (superseding deploy-21's placement an
+  hour earlier): the Patients title is now a fixed glass pill
+  centered between the menu and view-toggle circles — the
+  deploy-19 design intent — staying put while the list scrolls
+  under it. The Add Patient button rides at the docked strip's
+  right end (just left of the toggle circle); the count note
+  again clears the fixed search with its 118px top margin;
+  forced-desktop view un-docks the head back to the normal row.
 - **Mobile Patients title fix — Live 2026-11-02 (deploy-21:
   dashboard bundle `index-jIXS557U.js`, deployment
   https://342eda86.marcinnotech-app.pages.dev, verified —

@@ -3326,7 +3326,7 @@ label.contact-picker-row {
 
   .mobile-count-note {
     display: block;
-    margin: 0 0 10px;
+    margin: 118px 0 10px;
   }
 
   /* Title fix (Jake, 2026-11-02): the page head rendered AFTER
@@ -3341,9 +3341,43 @@ label.contact-picker-row {
     flex-direction: column;
   }
 
+  /* Docked title (Jake, 2026-11-02, superseding the deploy-21
+     in-flow placement): the Patients title is a fixed glass pill
+     centered between the menu and view-toggle circles, staying
+     put while the list scrolls under it. The strip itself never
+     intercepts taps; only the Add Patient button (parked at the
+     strip's right end, just left of the toggle circle) is live. */
   .patient-list-panel .list-page-head {
-    order: -1;
-    margin-top: 118px;
+    position: fixed;
+    top: 14px;
+    left: 64px;
+    right: 64px;
+    z-index: 60;
+    margin: 0;
+    justify-content: center;
+    pointer-events: none;
+  }
+
+  .patient-list-panel .list-page-head h1 {
+    font-size: 17px;
+    font-weight: 700;
+    line-height: 1;
+    padding: 13px 22px;
+    border-radius: 999px;
+    color: var(--text);
+    background: color-mix(in srgb, var(--panel) 66%, transparent);
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--border);
+    box-shadow: 0 8px 22px rgba(10, 25, 22, 0.16);
+  }
+
+  .patient-list-panel .list-page-head .add-patient-btn {
+    position: absolute;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    pointer-events: auto;
   }
 
   .patient-cards {
@@ -3449,6 +3483,29 @@ label.contact-picker-row {
 
 .force-desktop .patient-list-panel .patients-table {
   display: table;
+}
+
+.force-desktop .patient-list-panel .list-page-head {
+  position: static;
+  margin: 0 0 16px;
+  justify-content: space-between;
+  pointer-events: auto;
+}
+
+.force-desktop .patient-list-panel .list-page-head h1 {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.force-desktop .patient-list-panel .list-page-head .add-patient-btn {
+  position: static;
+  transform: none;
 }
 
 .force-desktop .patient-list-panel .agency-search-row {
