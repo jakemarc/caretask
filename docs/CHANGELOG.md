@@ -6,6 +6,38 @@ built and verified but not deployed.
 
 ## 2026-11-02
 
+- **Expenses simplified → mileage day log — Live
+  2026-11-02 (deploy-27: API migration + routes on the VM +
+  dashboard bundle `index-zT2OwENT.js`, deployment
+  https://1c152405.marcinnotech-app.pages.dev, verified —
+  Cloudflare API canonical deployment matches, the deployment
+  URL serves the new bundle, main-domain asset 200, API
+  /health green).** Jake's spec: log mileage, generate a
+  report monthly or by date range filtered by agency, NO
+  approval process. Refined by Jake into a day chain and
+  approved via mockup: home -> office bookends are fixed
+  personal legs (addresses from the staff and agency
+  profiles); patient stops between them are billable legs in
+  visit order; routing defaults to tollway with a per-leg
+  back-roads toggle; every leg end tappable (Home / Office /
+  patient) or typeable (autocomplete). API:
+  `schema-mileage-chains.sql` gives `mileage_entries`
+  `user_id` / `agency_id` / `patient_id` / endpoint labels
+  (backfilled from envelopes) and makes the envelope link
+  nullable; new `GET|POST|PUT|DELETE /mileage` and
+  `GET /mileage/report` (chain math — billable = business
+  legs, personal = commute bookends, dollars only from rated
+  business legs). The envelope lifecycle (create / submit /
+  approve / reject / pay, expense lines) is REMOVED; legacy
+  envelope reads stay read-only with their original math.
+  The old test data (report #1 + 2 entries) was wiped at
+  Jake's direction — it was form-testing data — so the log
+  starts clean. Dashboard: `ExpensesView` rebuilt as the
+  chain editor + report generator (print/PDF via print
+  CSS); `expensesApi.ts` rewritten; new `.mlg-*` styles.
+  Suite: `e2e-expenses-test.js` rewritten, 45 checks, all
+  passing; full battery green before deploy.
+
 - **Manager PIN removed → role gates — Live 2026-11-02
   (deploy-26: API patch on the VM + dashboard bundle
   `index-Deu836Rg.js`, deployment

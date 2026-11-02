@@ -1,46 +1,38 @@
-// Expense Reports API client (2026-11-01).
+// Mileage API client (rewritten 2026-11-02 for the day-chain
+// simplification — no approval process).
+//
+// Model: mileage is a per-clinician DAY LOG of legs. A day's
+// legs in seq order form a chain: 'commute' legs are the fixed
+// home<->office bookends (personal miles); 'business' legs are
+// billable. Reports are GENERATED over any date range with an
+// optional agency filter (GET /mileage/report). The old report
+// envelopes are legacy read-only on the API and unused here.
 //
 // Mirrors patientApi.ts's fetch discipline (Firebase ID token,
-// status + API error code surfaced on the thrown error) against
-// the expense-reports routes. Types follow the API's
-// normalization: ids and NUMERICs arrive as numbers, DATEs as
-// 'YYYY-MM-DD' strings.
+// status + API error code surfaced on the thrown error). Types
+// follow the API's normalization: ids and NUMERICs arrive as
+// numbers, DATEs as 'YYYY-MM-DD' strings.
 import type { User } from "firebase/auth";
 import { apiBase } from "./patientApi";
 
-export interface ExpenseReport {
-  id: number;
-  user_id: number;
-  agency_id: number | null;
-  title: string | null;
-  period_start: string;
-  period_end: string;
-  status: "draft" | "submitted" | "approved" | "rejected" | "paid";
-  submitted_at: string | null;
-  approved_by: number | null;
-  approved_at: string | null;
-  paid_at: string | null;
-  payment_ref: string | null;
-  notes: string | null;
-  owner_name?: string;
-  created_at: string;
-  updated_at: string;
-  deleted_at: string | null;
-}
-
 export interface MileageEntry {
   id: number;
-  expense_report_id: number;
+  expense_report_id: number | null;
+  user_id: number | null;
+  agency_id: number | null;
   entry_date: string;
   seq: number;
   entry_kind: "business" | "commute";
+  start_label: string | null;
   start_address: string | null;
+  end_label: string | null;
   end_address: string | null;
   start_lat: number | null;
   start_lng: number | null;
   end_lat: number | null;
   end_lng: number | null;
   appointment_id: number | null;
+  patient_id: string | null;
   miles_toll: number | null;
   miles_no_toll: number | null;
   used_tollway: boolean;
@@ -52,39 +44,50 @@ export interface MileageEntry {
   deleted_at: string | null;
 }
 
-export interface ExpenseLine {
-  id: number;
-  report_id: number;
-  user_id: number;
-  expense_date: string;
-  category: string;
-  description: string | null;
-  vendor_name: string | null;
-  amount_cents: number;
-  payment_method: string | null;
-  receipt_url: string | null;
-  agency_id: number | null;
-  notes: string | null;
-  deleted_at: string | null;
+export interface MileageInput {
+  entry_date: string;
+  seq: number;
+  entry_kind: "business" | "commute";
+  start_label?: string | null;
+  start_address?: string | null;
+  end_label?: string | null;
+  end_address?: string | null;
+  start_lat?: number | null;
+  start_lng?: number | null;
+  end_lat?: number | null;
+  end_lng?: number | null;
+  appointment_id?: number | null;
+  patient_id?: string | null;
+  agency_id?: number | null;
+  miles_toll?: number | null;
+  miles_no_toll?: number | null;
+  used_tollway?: boolean;
+  round_trip?: boolean;
+  business_miles: number;
+  rate_per_mile?: number | null;
+  vehicle?: string | null;
+  notes?: string | null;
 }
 
-export interface ReportDay {
+export interface MileageReportDay {
   date: string;
+  legs: MileageEntry[];
+  billable_miles: number;
+  personal_miles: number;
   driven_miles: number;
-  commute_miles: number;
-  reimbursable_miles: number;
-  entries: MileageEntry[];
+  amount_cents: number;
 }
 
-export interface ReportDetail {
-  report: ExpenseReport;
-  days: ReportDay[];
-  expenses: ExpenseLine[];
+export interface MileageReport {
+  user_id: number;
+  clinician_name: string | null;
+  from: string;
+  to: string;
+  agency_id: number | null;
+  days: MileageReportDay[];
+  total_billable_miles: number;
+  total_personal_miles: number;
   total_driven_miles: number;
-  total_commute_miles: number;
-  total_reimbursable_miles: number;
-  mileage_amount_cents: number;
-  expenses_amount_cents: number;
   total_amount_cents: number;
 }
 
@@ -97,7 +100,7 @@ async function apiFetch(
   user: User,
   path: string,
   init?: RequestInit,
-  timeoutMs = 5000,
+  timeoutMs = 8000,
 ): Promise<unknown> {
   const base = apiBase();
   if (!base) throw new Error("patient API is not configured");
@@ -113,15 +116,15 @@ async function apiFetch(
   });
   if (!res.ok) {
     let code: string | undefined;
+    let message = `request failed (${res.status})`;
     try {
-      const body = (await res.json()) as { code?: string } | null;
+      const body = (await res.json()) as { code?: string; error?: string } | null;
       code = body?.code;
+      if (body?.error) message = body.error;
     } catch {
       // status alone will have to do
     }
-    const err = new Error(
-      `expense API request failed: ${res.status}`,
-    ) as ApiRequestError;
+    const err = new Error(message) as ApiRequestError;
     err.status = res.status;
     err.code = code;
     throw err;
@@ -130,157 +133,74 @@ async function apiFetch(
   return res.json();
 }
 
-const json = (body: unknown): RequestInit => ({
-  method: "POST",
-  body: JSON.stringify(body),
-});
-
-// The label a report shows: its friendly title when set, else
-// one generated from the period ("October 2026 Expense
-// Report").
-export function reportLabel(r: ExpenseReport): string {
-  if (r.title) return r.title;
-  const start = new Date(`${r.period_start}T12:00:00`);
-  const month = start.toLocaleString("en-US", { month: "long" });
-  return `${month} ${start.getFullYear()} Expense Report`;
+function qs(params: Record<string, string | number | null | undefined>): string {
+  const parts: string[] = [];
+  for (const [k, v] of Object.entries(params)) {
+    if (v === null || v === undefined || v === "") continue;
+    parts.push(`${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`);
+  }
+  return parts.length ? `?${parts.join("&")}` : "";
 }
 
-export async function listExpenseReports(user: User): Promise<ExpenseReport[]> {
-  return (await apiFetch(user, "/expense-reports")) as ExpenseReport[];
-}
-
-export async function createExpenseReport(
+export async function fetchMileage(
   user: User,
-  body: { period_start: string; period_end: string; title?: string },
-): Promise<ExpenseReport> {
-  const out = (await apiFetch(user, "/expense-reports", json(body))) as {
-    report: ExpenseReport;
+  params: { from?: string; to?: string; agency_id?: number | null; user_id?: number } = {},
+): Promise<MileageEntry[]> {
+  const data = (await apiFetch(user, `/mileage${qs(params)}`)) as {
+    entries: MileageEntry[];
   };
-  return out.report;
+  return data.entries;
 }
 
-export async function getExpenseReport(
+export async function createMileage(
   user: User,
-  id: number,
-): Promise<ReportDetail> {
-  return (await apiFetch(user, `/expense-reports/${id}`)) as ReportDetail;
-}
-
-export async function deleteExpenseReport(user: User, id: number): Promise<void> {
-  await apiFetch(user, `/expense-reports/${id}`, { method: "DELETE" });
-}
-
-export async function submitExpenseReport(
-  user: User,
-  id: number,
-): Promise<ExpenseReport> {
-  const out = (await apiFetch(user, `/expense-reports/${id}/submit`, {
-    method: "POST",
-  })) as { report: ExpenseReport };
-  return out.report;
-}
-
-// Lifecycle actions (approve / reject / pay) are ROLE-GATED on
-// the API (manager/admin), and a manager cannot process their
-// own report (403 SELF_APPROVAL).
-export async function approveExpenseReport(
-  user: User,
-  id: number,
-): Promise<ExpenseReport> {
-  const out = (await apiFetch(user, `/expense-reports/${id}/approve`, { method: "POST" })) as {
-    report: ExpenseReport;
-  };
-  return out.report;
-}
-
-export async function rejectExpenseReport(
-  user: User,
-  id: number,
-): Promise<ExpenseReport> {
-  const out = (await apiFetch(user, `/expense-reports/${id}/reject`, { method: "POST" })) as {
-    report: ExpenseReport;
-  };
-  return out.report;
-}
-
-export async function payExpenseReport(
-  user: User,
-  id: number,
-  paymentRef: string,
-): Promise<ExpenseReport> {
-  const out = (await apiFetch(user, `/expense-reports/${id}/pay`, {
-    method: "POST",
-    body: JSON.stringify({ payment_ref: paymentRef || undefined }),
-  })) as { report: ExpenseReport };
-  return out.report;
-}
-
-export type MileageEntryInput = Omit<
-  MileageEntry,
-  "id" | "expense_report_id" | "deleted_at"
->;
-
-export async function addMileageEntry(
-  user: User,
-  reportId: number,
-  body: Partial<MileageEntryInput> & { entry_date: string; business_miles: number },
+  input: MileageInput,
 ): Promise<MileageEntry> {
-  const out = (await apiFetch(
-    user,
-    `/expense-reports/${reportId}/mileage`,
-    json(body),
-  )) as { entry: MileageEntry };
-  return out.entry;
+  const data = (await apiFetch(user, "/mileage", {
+    method: "POST",
+    body: JSON.stringify(input),
+  })) as { entry: MileageEntry };
+  return data.entry;
 }
 
-export async function deleteMileageEntry(
+export async function updateMileage(
   user: User,
-  reportId: number,
-  entryId: number,
-): Promise<void> {
-  await apiFetch(user, `/expense-reports/${reportId}/mileage/${entryId}`, {
-    method: "DELETE",
-  });
+  id: number,
+  input: MileageInput,
+): Promise<MileageEntry> {
+  const data = (await apiFetch(user, `/mileage/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(input),
+  })) as { entry: MileageEntry };
+  return data.entry;
 }
 
-export type ExpenseLineInput = Pick<
-  ExpenseLine,
-  "expense_date" | "category" | "amount_cents"
-> &
-  Partial<Omit<ExpenseLine, "id" | "report_id" | "user_id" | "deleted_at" | "expense_date" | "category" | "amount_cents">>;
-
-export async function addExpenseLine(
-  user: User,
-  reportId: number,
-  body: ExpenseLineInput,
-): Promise<ExpenseLine> {
-  const out = (await apiFetch(
-    user,
-    `/expense-reports/${reportId}/expenses`,
-    json(body),
-  )) as { expense: ExpenseLine };
-  return out.expense;
+export async function deleteMileage(user: User, id: number): Promise<void> {
+  await apiFetch(user, `/mileage/${id}`, { method: "DELETE" });
 }
 
-export async function deleteExpenseLine(
+export async function fetchMileageReport(
   user: User,
-  reportId: number,
-  expenseId: number,
-): Promise<void> {
-  await apiFetch(user, `/expense-reports/${reportId}/expenses/${expenseId}`, {
-    method: "DELETE",
-  });
+  params: { from: string; to: string; agency_id?: number | null; user_id?: number },
+): Promise<MileageReport> {
+  return (await apiFetch(user, `/mileage/report${qs(params)}`)) as MileageReport;
 }
 
-// Road miles for one leg, both routing variants. Longer
-// timeout than the standard calls — a public routing engine
-// can take a few seconds. Either figure may be null.
-export async function routeMileage(
+// Route one leg (coordinates only) → both figures; either may
+// be null when only one variant routed; throws ROUTE_FAILED
+// (502) when neither did.
+export async function routeMiles(
   user: User,
-  coords: { start_lat: number; start_lng: number; end_lat: number; end_lng: number },
+  from: { lat: number; lng: number },
+  to: { lat: number; lng: number },
 ): Promise<{ miles_toll: number | null; miles_no_toll: number | null }> {
-  return (await apiFetch(user, "/mileage/route", json(coords), 20000)) as {
-    miles_toll: number | null;
-    miles_no_toll: number | null;
-  };
+  return (await apiFetch(user, "/mileage/route", {
+    method: "POST",
+    body: JSON.stringify({
+      start_lat: from.lat,
+      start_lng: from.lng,
+      end_lat: to.lat,
+      end_lng: to.lng,
+    }),
+  })) as { miles_toll: number | null; miles_no_toll: number | null };
 }

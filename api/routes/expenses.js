@@ -1,27 +1,41 @@
-// Expense reports API (2026-11-01, Jake's spec).
+// Mileage + expense reporting API.
 //
-// Model: one expense report per clinician per period
-// (usually a month). During the month the owner adds mileage
-// entries (drives between patient homes) and non-mileage
-// expense lines; the home↔home-office commute is entered as
-// 'commute' mileage entries and deducted per day — daily
-// reimbursable miles = max(0, driven that day − commute that
-// day). The report stays editable while draft; the owner
-// submits it for payment; a manager approves and marks it
-// paid with the manager PIN (the override is attributed to
-// the PIN's owner, same model as the staff/patient gates).
+// 2026-11-02 SIMPLIFICATION (Jake): no approval process.
+// Mileage is a per-clinician DAY LOG of legs (a chain), not
+// lines inside a monthly report envelope:
+//
+// - A day's legs in seq order: 'commute' legs are the fixed
+//   home<->office bookends (personal miles, never billed);
+//   'business' legs are the billable chain (office -> patient
+//   -> patient -> ... -> office). business_miles is the leg's
+//   FINAL miles for both kinds; miles_toll / miles_no_toll
+//   keep both routed figures and used_tollway says which one
+//   the clinician actually drove (default tollway).
+// - Each leg is owned (user_id), agency-tagged (agency_id),
+//   and may link the patient it ends at (patient_id) — labels
+//   and addresses ride along for display.
+// - Reports are GENERATED from the log: GET /mileage/report
+//   over any date range, optionally filtered by agency.
+//   Billable dollars = sum over business legs carrying a rate
+//   snapshot of miles x rate; personal legs never pay.
+//
+// The pre-2026-11-02 envelope model (expense_reports with a
+// draft -> submitted -> approved -> paid lifecycle, mileage
+// and expense lines inside a report) is retired: no create /
+// lifecycle / line endpoints remain. The tables stay, and the
+// two envelope reads below stay as LEGACY read-only history
+// (they keep the old driven-minus-commute math that matches
+// how those entries were recorded). Non-mileage expense
+// lines are parked with the envelopes (data kept, no API).
 //
 // Access: the caller must resolve to an active users row.
-// Owners see and edit their own reports; manager/admin roles
-// can list and read all reports (they run approval/payment).
-// Writes to a report's contents are owner-only and
-// draft-only. Event log: 'expense_change' events carry ids
-// and status only — never addresses, amounts, or notes.
+// Legs are owner-written; managers/admins may READ another
+// clinician's log and generated reports (user_id parameter).
+// Event log: 'expense_change' events carry ids only — never
+// addresses, amounts, or notes.
 const express = require('express');
 const pool = require('../db');
 const { insertEvent } = require('../lib/eventLog');
-const { requireRole, attachManager } = require('../lib/requireRole');
-const requireManagerRole = requireRole('manager', 'admin');
 const { routeLeg } = require('../lib/routing');
 
 const router = express.Router();
@@ -77,6 +91,10 @@ function numOrNull(v) {
   return Number.isFinite(n) ? n : null;
 }
 
+const round2 = (n) => Math.round(n * 100) / 100;
+
+// ---------------- normalization ----------------
+
 function normalizeReport(r) {
   if (!r) return r;
   return {
@@ -95,9 +113,15 @@ function normalizeEntry(e) {
   return {
     ...e,
     id: Number(e.id),
-    expense_report_id: Number(e.expense_report_id),
+    expense_report_id: e.expense_report_id === null ? null : Number(e.expense_report_id),
+    user_id: e.user_id === null ? null : Number(e.user_id),
+    agency_id: e.agency_id === null ? null : Number(e.agency_id),
     appointment_id: e.appointment_id === null ? null : Number(e.appointment_id),
     entry_date: dateOnly(e.entry_date),
+    start_lat: e.start_lat === null ? null : Number(e.start_lat),
+    start_lng: e.start_lng === null ? null : Number(e.start_lng),
+    end_lat: e.end_lat === null ? null : Number(e.end_lat),
+    end_lng: e.end_lng === null ? null : Number(e.end_lng),
     miles_toll: e.miles_toll === null ? null : Number(e.miles_toll),
     miles_no_toll: e.miles_no_toll === null ? null : Number(e.miles_no_toll),
     business_miles: Number(e.business_miles),
@@ -117,6 +141,330 @@ function normalizeExpense(x) {
   };
 }
 
+// ---------------- shared query scoping ----------------
+
+// Whose log is being read: the caller's own, unless a manager
+// asks for another clinician's via ?user_id=.
+async function scopeUserId(req, me) {
+  const raw = req.query.user_id;
+  if (raw === undefined) return Number(me.id);
+  const n = Number(raw);
+  if (!Number.isInteger(n)) {
+    throw httpError(400, 'user_id must be an integer', 'USER_ID_INVALID');
+  }
+  if (n !== Number(me.id) && !isManagerRole(me)) {
+    throw httpError(403, "only managers can view another clinician's mileage", 'FORBIDDEN');
+  }
+  return n;
+}
+
+function rangeAndAgency(req) {
+  const from = req.query.from;
+  const to = req.query.to;
+  if (from !== undefined && !isDateStr(from)) {
+    throw httpError(400, 'from must be a YYYY-MM-DD date', 'RANGE_INVALID');
+  }
+  if (to !== undefined && !isDateStr(to)) {
+    throw httpError(400, 'to must be a YYYY-MM-DD date', 'RANGE_INVALID');
+  }
+  let agencyId = null;
+  if (req.query.agency_id !== undefined) {
+    agencyId = Number(req.query.agency_id);
+    if (!Number.isInteger(agencyId) || agencyId < 1) {
+      throw httpError(400, 'agency_id must be a positive integer', 'AGENCY_ID_INVALID');
+    }
+  }
+  return { from: from || null, to: to || null, agencyId };
+}
+
+async function fetchLegs(userId, { from, to, agencyId }) {
+  const clauses = ['user_id = $1', 'deleted_at IS NULL'];
+  const vals = [userId];
+  if (from) { vals.push(from); clauses.push(`entry_date >= $${vals.length}`); }
+  if (to) { vals.push(to); clauses.push(`entry_date <= $${vals.length}`); }
+  if (agencyId) { vals.push(agencyId); clauses.push(`agency_id = $${vals.length}`); }
+  const r = await pool.query(
+    `SELECT * FROM mileage_entries
+      WHERE ${clauses.join(' AND ')}
+      ORDER BY entry_date, seq, id`,
+    vals,
+  );
+  return r.rows.map(normalizeEntry);
+}
+
+// ---------------- mileage legs ----------------
+
+function entryFromBody(b, existing) {
+  const e = existing || {};
+  const pick = (key, cur) => (b[key] !== undefined ? b[key] : cur);
+  const coord = (key, cur) => numOrNull(pick(key, cur));
+  const out = {
+    entry_date: pick('entry_date', e.entry_date),
+    seq: pick('seq', e.seq ?? 0),
+    entry_kind: pick('entry_kind', e.entry_kind ?? 'business'),
+    start_label: pick('start_label', e.start_label ?? null),
+    start_address: pick('start_address', e.start_address ?? null),
+    end_label: pick('end_label', e.end_label ?? null),
+    end_address: pick('end_address', e.end_address ?? null),
+    start_lat: coord('start_lat', e.start_lat ?? null),
+    start_lng: coord('start_lng', e.start_lng ?? null),
+    end_lat: coord('end_lat', e.end_lat ?? null),
+    end_lng: coord('end_lng', e.end_lng ?? null),
+    appointment_id: numOrNull(pick('appointment_id', e.appointment_id ?? null)),
+    patient_id: pick('patient_id', e.patient_id ?? null),
+    agency_id: numOrNull(pick('agency_id', e.agency_id ?? null)),
+    miles_toll: numOrNull(pick('miles_toll', e.miles_toll ?? null)),
+    miles_no_toll: numOrNull(pick('miles_no_toll', e.miles_no_toll ?? null)),
+    used_tollway: Boolean(pick('used_tollway', e.used_tollway ?? false)),
+    round_trip: Boolean(pick('round_trip', e.round_trip ?? false)),
+    business_miles: numOrNull(pick('business_miles', e.business_miles)),
+    rate_per_mile: numOrNull(pick('rate_per_mile', e.rate_per_mile ?? null)),
+    vehicle: pick('vehicle', e.vehicle ?? null),
+    notes: pick('notes', e.notes ?? null),
+  };
+  if (!isDateStr(out.entry_date)) {
+    throw httpError(400, 'entry_date must be a YYYY-MM-DD date', 'ENTRY_DATE_INVALID');
+  }
+  if (out.entry_kind !== 'business' && out.entry_kind !== 'commute') {
+    throw httpError(400, 'entry_kind must be business or commute', 'ENTRY_KIND_INVALID');
+  }
+  if (!Number.isInteger(out.seq) || out.seq < 0) {
+    throw httpError(400, 'seq must be an integer ≥ 0', 'ENTRY_SEQ_INVALID');
+  }
+  if (out.business_miles === null || out.business_miles < 0) {
+    throw httpError(400, 'business_miles must be a number ≥ 0', 'ENTRY_MILES_INVALID');
+  }
+  for (const [k, v, lim] of [
+    ['start_lat', out.start_lat, 90], ['end_lat', out.end_lat, 90],
+    ['start_lng', out.start_lng, 180], ['end_lng', out.end_lng, 180],
+  ]) {
+    if (v !== null && Math.abs(v) > lim) {
+      throw httpError(400, `${k} is out of range`, 'ENTRY_COORDS_INVALID');
+    }
+  }
+  if (out.miles_toll !== null && out.miles_toll < 0) {
+    throw httpError(400, 'miles_toll must be ≥ 0', 'ENTRY_MILES_INVALID');
+  }
+  if (out.miles_no_toll !== null && out.miles_no_toll < 0) {
+    throw httpError(400, 'miles_no_toll must be ≥ 0', 'ENTRY_MILES_INVALID');
+  }
+  if (out.rate_per_mile !== null && out.rate_per_mile < 0) {
+    throw httpError(400, 'rate_per_mile must be ≥ 0', 'ENTRY_RATE_INVALID');
+  }
+  return out;
+}
+
+async function validateRefs(v) {
+  if (v.agency_id !== null) {
+    const r = await pool.query('SELECT id FROM agencies WHERE id = $1', [v.agency_id]);
+    if (!r.rows.length) throw httpError(400, 'agency not found', 'AGENCY_NOT_FOUND');
+  }
+  if (v.patient_id !== null) {
+    const r = await pool.query(
+      'SELECT id FROM patients WHERE id = $1 AND deleted_at IS NULL',
+      [v.patient_id],
+    );
+    if (!r.rows.length) throw httpError(400, 'patient not found', 'PATIENT_NOT_FOUND');
+  }
+}
+
+const ENTRY_COLS = [
+  'entry_date', 'seq', 'entry_kind', 'start_label', 'start_address',
+  'end_label', 'end_address', 'start_lat', 'start_lng', 'end_lat',
+  'end_lng', 'appointment_id', 'patient_id', 'agency_id',
+  'miles_toll', 'miles_no_toll', 'used_tollway', 'round_trip',
+  'business_miles', 'rate_per_mile', 'vehicle', 'notes',
+];
+
+router.get('/mileage', async (req, res, next) => {
+  try {
+    const me = await resolveMe(pool, req);
+    const userId = await scopeUserId(req, me);
+    const legs = await fetchLegs(userId, rangeAndAgency(req));
+    res.json({ user_id: userId, entries: legs });
+  } catch (err) {
+    sendErr(res, next, err);
+  }
+});
+
+router.post('/mileage', async (req, res, next) => {
+  try {
+    const me = await resolveMe(pool, req);
+    const v = entryFromBody(req.body || {});
+    await validateRefs(v);
+    const cols = ['user_id', ...ENTRY_COLS];
+    const vals = [me.id, ...ENTRY_COLS.map((c) => v[c])];
+    const ph = cols.map((_, i) => `$${i + 1}`).join(', ');
+    const r = await pool.query(
+      `INSERT INTO mileage_entries (${cols.join(', ')}) VALUES (${ph}) RETURNING *`,
+      vals,
+    );
+    await insertEvent(pool, {
+      actor: req.user,
+      event: 'expense_change',
+      details: { action: 'mileage_create', entry_id: Number(r.rows[0].id) },
+      ip: req.ip,
+    });
+    res.status(201).json({ entry: normalizeEntry(r.rows[0]) });
+  } catch (err) {
+    sendErr(res, next, err);
+  }
+});
+
+async function loadOwnedLeg(req, me) {
+  const r = await pool.query('SELECT * FROM mileage_entries WHERE id = $1', [req.params.id]);
+  if (!r.rows.length || r.rows[0].deleted_at) {
+    throw httpError(404, 'mileage entry not found', 'ENTRY_NOT_FOUND');
+  }
+  const leg = normalizeEntry(r.rows[0]);
+  if (Number(leg.user_id) !== Number(me.id)) {
+    throw httpError(403, 'only the owner can change this entry', 'FORBIDDEN');
+  }
+  return leg;
+}
+
+router.put('/mileage/:id', async (req, res, next) => {
+  try {
+    const me = await resolveMe(pool, req);
+    const existing = await loadOwnedLeg(req, me);
+    const v = entryFromBody(req.body || {}, existing);
+    await validateRefs(v);
+    const sets = ENTRY_COLS.map((c, i) => `${c} = $${i + 2}`).join(', ');
+    const r = await pool.query(
+      `UPDATE mileage_entries SET ${sets} WHERE id = $1 RETURNING *`,
+      [existing.id, ...ENTRY_COLS.map((c) => v[c])],
+    );
+    await insertEvent(pool, {
+      actor: req.user,
+      event: 'expense_change',
+      details: { action: 'mileage_update', entry_id: existing.id },
+      ip: req.ip,
+    });
+    res.json({ entry: normalizeEntry(r.rows[0]) });
+  } catch (err) {
+    sendErr(res, next, err);
+  }
+});
+
+router.delete('/mileage/:id', async (req, res, next) => {
+  try {
+    const me = await resolveMe(pool, req);
+    const existing = await loadOwnedLeg(req, me);
+    await pool.query('UPDATE mileage_entries SET deleted_at = now() WHERE id = $1', [existing.id]);
+    await insertEvent(pool, {
+      actor: req.user,
+      event: 'expense_change',
+      details: { action: 'mileage_delete', entry_id: existing.id },
+      ip: req.ip,
+    });
+    res.json({ entry: { ...existing, deleted_at: new Date().toISOString() } });
+  } catch (err) {
+    sendErr(res, next, err);
+  }
+});
+
+// ---------------- generated report ----------------
+
+// Chain-model day math: billable = business legs; personal =
+// commute legs; dollars only from rated business legs.
+function summarizeLegs(entries) {
+  const byDate = new Map();
+  for (const e of entries) {
+    const day = byDate.get(e.entry_date) || {
+      date: e.entry_date,
+      legs: [],
+      billable_miles: 0,
+      personal_miles: 0,
+      amount_cents: 0,
+    };
+    if (e.entry_kind === 'commute') {
+      day.personal_miles += e.business_miles;
+    } else {
+      day.billable_miles += e.business_miles;
+      if (e.rate_per_mile !== null) {
+        day.amount_cents += Math.round(e.business_miles * e.rate_per_mile * 100);
+      }
+    }
+    day.legs.push(e);
+    byDate.set(e.entry_date, day);
+  }
+  const days = [...byDate.values()]
+    .sort((a, b) => (a.date < b.date ? -1 : 1))
+    .map((d) => ({
+      ...d,
+      billable_miles: round2(d.billable_miles),
+      personal_miles: round2(d.personal_miles),
+      driven_miles: round2(d.billable_miles + d.personal_miles),
+    }));
+  return {
+    days,
+    total_billable_miles: round2(days.reduce((s, d) => s + d.billable_miles, 0)),
+    total_personal_miles: round2(days.reduce((s, d) => s + d.personal_miles, 0)),
+    total_driven_miles: round2(days.reduce((s, d) => s + d.driven_miles, 0)),
+    total_amount_cents: days.reduce((s, d) => s + d.amount_cents, 0),
+  };
+}
+
+router.get('/mileage/report', async (req, res, next) => {
+  try {
+    const me = await resolveMe(pool, req);
+    const userId = await scopeUserId(req, me);
+    const range = rangeAndAgency(req);
+    if (!range.from || !range.to) {
+      throw httpError(400, 'from and to are required for a report', 'RANGE_REQUIRED');
+    }
+    const legs = await fetchLegs(userId, range);
+    const u = await pool.query(
+      `SELECT (lname || ', ' || fname) AS name FROM users WHERE id = $1`,
+      [userId],
+    );
+    res.json({
+      user_id: userId,
+      clinician_name: u.rows.length ? u.rows[0].name : null,
+      from: range.from,
+      to: range.to,
+      agency_id: range.agencyId,
+      ...summarizeLegs(legs),
+    });
+  } catch (err) {
+    sendErr(res, next, err);
+  }
+});
+
+// ---------------- routing ----------------
+
+// POST /mileage/route { start_lat, start_lng, end_lat, end_lng }
+// → { miles_toll, miles_no_toll } (either may be null when
+// only one variant routed). Coordinates only — address text
+// is geocoded by the client (autocomplete / GPS picks carry
+// coordinates in this app).
+router.post('/mileage/route', async (req, res, next) => {
+  try {
+    await resolveMe(pool, req);
+    const b = req.body || {};
+    const from = { lat: numOrNull(b.start_lat), lng: numOrNull(b.start_lng) };
+    const to = { lat: numOrNull(b.end_lat), lng: numOrNull(b.end_lng) };
+    if (from.lat === null || from.lng === null || to.lat === null || to.lng === null) {
+      throw httpError(400, 'start and end coordinates are required', 'ROUTE_COORDS_REQUIRED');
+    }
+    const { milesToll, milesNoToll } = await routeLeg(from, to);
+    res.json({
+      miles_toll: milesToll === null ? null : Math.round(milesToll * 100) / 100,
+      miles_no_toll: milesNoToll === null ? null : Math.round(milesNoToll * 100) / 100,
+    });
+  } catch (err) {
+    if (err.code === 'ROUTE_FAILED') {
+      return res.status(502).json({ error: err.message, code: err.code });
+    }
+    return sendErr(res, next, err);
+  }
+});
+
+// ---------------- legacy envelope reads (read-only) ----------------
+// Pre-simplification monthly reports. Kept readable so the
+// history (and its original driven-minus-commute math) stays
+// reachable; nothing new is written through these routes.
+
 async function fetchReport(db, id) {
   const r = await db.query(
     `SELECT er.*, (u.lname || ', ' || u.fname) AS owner_name
@@ -128,10 +476,6 @@ async function fetchReport(db, id) {
   return r.rows.length ? normalizeReport(r.rows[0]) : null;
 }
 
-// Totals for one report: entries grouped by day with the
-// commute deduction applied per day (floor zero), plus the
-// non-mileage lines. Mileage dollars come only from entries
-// carrying a rate snapshot; miles are always complete.
 async function summarize(db, reportId) {
   const [entriesR, expensesR] = await Promise.all([
     db.query(
@@ -167,10 +511,9 @@ async function summarize(db, reportId) {
     .sort((a, b) => (a.date < b.date ? -1 : 1))
     .map((d) => ({
       ...d,
-      driven_miles: Math.round(d.driven_miles * 100) / 100,
-      commute_miles: Math.round(d.commute_miles * 100) / 100,
-      reimbursable_miles:
-        Math.round(Math.max(0, d.driven_miles - d.commute_miles) * 100) / 100,
+      driven_miles: round2(d.driven_miles),
+      commute_miles: round2(d.commute_miles),
+      reimbursable_miles: round2(Math.max(0, d.driven_miles - d.commute_miles)),
     }));
 
   let mileageAmountCents = 0;
@@ -182,10 +525,6 @@ async function summarize(db, reportId) {
       mileageAmountCents += Math.round(e.business_miles * e.rate_per_mile * 100);
     }
   }
-  // A day whose commute exceeds its driving can't claim
-  // negative dollars either: recompute the amount floor per
-  // day when every entry that day is rated (the common case
-  // of one rate all month makes this exact).
   const allRated = entries.every((e) => e.rate_per_mile !== null);
   if (allRated && entries.length) {
     mileageAmountCents = 0;
@@ -199,79 +538,40 @@ async function summarize(db, reportId) {
   return {
     days,
     expenses,
-    total_driven_miles: Math.round(days.reduce((s, d) => s + d.driven_miles, 0) * 100) / 100,
-    total_commute_miles: Math.round(days.reduce((s, d) => s + d.commute_miles, 0) * 100) / 100,
-    total_reimbursable_miles: Math.round(days.reduce((s, d) => s + d.reimbursable_miles, 0) * 100) / 100,
+    total_driven_miles: round2(days.reduce((s, d) => s + d.driven_miles, 0)),
+    total_commute_miles: round2(days.reduce((s, d) => s + d.commute_miles, 0)),
+    total_reimbursable_miles: round2(days.reduce((s, d) => s + d.reimbursable_miles, 0)),
     mileage_amount_cents: mileageAmountCents,
     expenses_amount_cents: expensesCents,
     total_amount_cents: mileageAmountCents + expensesCents,
   };
 }
 
-async function loadOwnedDraft(req, res, next, { forWrite }) {
-  const me = await resolveMe(pool, req);
-  const report = await fetchReport(pool, req.params.id);
-  if (!report || report.deleted_at) {
-    throw httpError(404, 'expense report not found', 'REPORT_NOT_FOUND');
-  }
-  if (Number(report.user_id) !== Number(me.id)) {
-    throw httpError(403, 'only the report owner can change it', 'FORBIDDEN');
-  }
-  if (forWrite && report.status !== 'draft') {
-    throw httpError(409, 'this report is no longer a draft', 'REPORT_LOCKED');
-  }
-  return { me, report };
-}
-
-// ---------------- reports ----------------
-
 router.get('/expense-reports', async (req, res, next) => {
   try {
     const me = await resolveMe(pool, req);
-    const r = isManagerRole(me)
-      ? await pool.query(
-          `SELECT er.*, (u.lname || ', ' || u.fname) AS owner_name
-             FROM expense_reports er JOIN users u ON u.id = er.user_id
-            WHERE er.deleted_at IS NULL
-            ORDER BY er.period_start DESC, er.id DESC`,
-        )
-      : await pool.query(
-          `SELECT er.*, (u.lname || ', ' || u.fname) AS owner_name
-             FROM expense_reports er JOIN users u ON u.id = er.user_id
-            WHERE er.deleted_at IS NULL AND er.user_id = $1
-            ORDER BY er.period_start DESC, er.id DESC`,
-          [me.id],
-        );
-    res.json(r.rows.map(normalizeReport));
-  } catch (err) {
-    sendErr(res, next, err);
-  }
-});
-
-router.post('/expense-reports', async (req, res, next) => {
-  try {
-    const me = await resolveMe(pool, req);
-    const b = req.body || {};
-    if (!isDateStr(b.period_start) || !isDateStr(b.period_end)) {
-      throw httpError(400, 'period_start and period_end must be YYYY-MM-DD dates', 'PERIOD_REQUIRED');
+    const clauses = ['er.deleted_at IS NULL'];
+    const vals = [];
+    if (!isManagerRole(me)) {
+      vals.push(me.id);
+      clauses.push(`er.user_id = $${vals.length}`);
+    } else if (req.query.user_id !== undefined) {
+      const n = Number(req.query.user_id);
+      if (!Number.isInteger(n)) {
+        throw httpError(400, 'user_id must be an integer', 'USER_ID_INVALID');
+      }
+      vals.push(n);
+      clauses.push(`er.user_id = $${vals.length}`);
     }
-    if (b.period_end < b.period_start) {
-      throw httpError(400, 'period_end is before period_start', 'PERIOD_INVALID');
-    }
-    const agencyId = numOrNull(b.agency_id);
     const r = await pool.query(
-      `INSERT INTO expense_reports (user_id, agency_id, title, period_start, period_end, notes)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-      [me.id, agencyId, b.title || null, b.period_start, b.period_end, b.notes || null],
+      `SELECT er.*, (u.lname || ', ' || u.fname) AS owner_name
+         FROM expense_reports er
+         JOIN users u ON u.id = er.user_id
+        WHERE ${clauses.join(' AND ')}
+        ORDER BY er.period_start DESC, er.id DESC`,
+      vals,
     );
-    const report = await fetchReport(pool, r.rows[0].id);
-    await insertEvent(pool, {
-      actor: req.user,
-      event: 'expense_change',
-      details: { action: 'report_create', report_id: report.id },
-      ip: req.ip,
-    });
-    res.status(201).json({ report });
+    res.json({ reports: r.rows.map(normalizeReport) });
   } catch (err) {
     sendErr(res, next, err);
   }
@@ -291,406 +591,6 @@ router.get('/expense-reports/:id', async (req, res, next) => {
     res.json({ report, ...summary });
   } catch (err) {
     sendErr(res, next, err);
-  }
-});
-
-router.put('/expense-reports/:id', async (req, res, next) => {
-  try {
-    const { report } = await loadOwnedDraft(req, res, next, { forWrite: true });
-    const b = req.body || {};
-    const updates = {};
-    if (b.title !== undefined) updates.title = b.title || null;
-    if (b.notes !== undefined) updates.notes = b.notes || null;
-    if (b.agency_id !== undefined) updates.agency_id = numOrNull(b.agency_id);
-    if (b.period_start !== undefined || b.period_end !== undefined) {
-      const start = b.period_start ?? report.period_start;
-      const end = b.period_end ?? report.period_end;
-      if (!isDateStr(start) || !isDateStr(end) || end < start) {
-        throw httpError(400, 'invalid report period', 'PERIOD_INVALID');
-      }
-      updates.period_start = start;
-      updates.period_end = end;
-    }
-    const keys = Object.keys(updates);
-    if (keys.length) {
-      const sets = keys.map((k, i) => `${k} = $${i + 2}`).join(', ');
-      await pool.query(
-        `UPDATE expense_reports SET ${sets} WHERE id = $1`,
-        [report.id, ...keys.map((k) => updates[k])],
-      );
-    }
-    res.json({ report: await fetchReport(pool, report.id) });
-  } catch (err) {
-    sendErr(res, next, err);
-  }
-});
-
-router.delete('/expense-reports/:id', async (req, res, next) => {
-  try {
-    const { report } = await loadOwnedDraft(req, res, next, { forWrite: true });
-    await pool.query('UPDATE expense_reports SET deleted_at = now() WHERE id = $1', [report.id]);
-    await insertEvent(pool, {
-      actor: req.user,
-      event: 'expense_change',
-      details: { action: 'report_delete', report_id: report.id },
-      ip: req.ip,
-    });
-    res.json({ report: await fetchReport(pool, report.id) });
-  } catch (err) {
-    sendErr(res, next, err);
-  }
-});
-
-// Owner submits a finished draft for payment.
-router.post('/expense-reports/:id/submit', async (req, res, next) => {
-  try {
-    const { report } = await loadOwnedDraft(req, res, next, { forWrite: true });
-    await pool.query(
-      `UPDATE expense_reports SET status = 'submitted', submitted_at = now() WHERE id = $1`,
-      [report.id],
-    );
-    await insertEvent(pool, {
-      actor: req.user,
-      event: 'expense_change',
-      details: { action: 'report_submit', report_id: report.id },
-      ip: req.ip,
-    });
-    res.json({ report: await fetchReport(pool, report.id) });
-  } catch (err) {
-    sendErr(res, next, err);
-  }
-});
-
-// Manager steps — role-gated (manager/admin); the acting manager
-// is recorded, and a manager cannot process their OWN report.
-router.post('/expense-reports/:id/approve', requireManagerRole, async (req, res, next) => {
-  try {
-    await resolveMe(pool, req);
-    const report = await fetchReport(pool, req.params.id);
-    if (!report || report.deleted_at) {
-      throw httpError(404, 'expense report not found', 'REPORT_NOT_FOUND');
-    }
-    if (Number(report.user_id) === Number(req.manager.id)) {
-      throw httpError(403, 'managers cannot process their own expense reports', 'SELF_APPROVAL');
-    }
-    if (report.status !== 'submitted') {
-      throw httpError(409, 'only a submitted report can be approved', 'REPORT_NOT_SUBMITTED');
-    }
-    await pool.query(
-      `UPDATE expense_reports SET status = 'approved', approved_by = $2, approved_at = now() WHERE id = $1`,
-      [report.id, req.manager.id],
-    );
-    await insertEvent(pool, {
-      actor: req.user,
-      event: 'expense_change',
-      details: { action: 'report_approve', report_id: report.id, manager_id: req.manager.id },
-      ip: req.ip,
-    });
-    res.json({ report: await fetchReport(pool, report.id) });
-  } catch (err) {
-    sendErr(res, next, err);
-  }
-});
-
-router.post('/expense-reports/:id/reject', requireManagerRole, async (req, res, next) => {
-  try {
-    await resolveMe(pool, req);
-    const report = await fetchReport(pool, req.params.id);
-    if (!report || report.deleted_at) {
-      throw httpError(404, 'expense report not found', 'REPORT_NOT_FOUND');
-    }
-    if (Number(report.user_id) === Number(req.manager.id)) {
-      throw httpError(403, 'managers cannot process their own expense reports', 'SELF_APPROVAL');
-    }
-    if (report.status !== 'submitted') {
-      throw httpError(409, 'only a submitted report can be rejected', 'REPORT_NOT_SUBMITTED');
-    }
-    // Rejection returns the report to draft so the owner can fix it.
-    await pool.query(
-      `UPDATE expense_reports SET status = 'draft', submitted_at = NULL WHERE id = $1`,
-      [report.id],
-    );
-    await insertEvent(pool, {
-      actor: req.user,
-      event: 'expense_change',
-      details: { action: 'report_reject', report_id: report.id, manager_id: req.manager.id },
-      ip: req.ip,
-    });
-    res.json({ report: await fetchReport(pool, report.id) });
-  } catch (err) {
-    sendErr(res, next, err);
-  }
-});
-
-router.post('/expense-reports/:id/pay', requireManagerRole, async (req, res, next) => {
-  try {
-    await resolveMe(pool, req);
-    const report = await fetchReport(pool, req.params.id);
-    if (!report || report.deleted_at) {
-      throw httpError(404, 'expense report not found', 'REPORT_NOT_FOUND');
-    }
-    if (Number(report.user_id) === Number(req.manager.id)) {
-      throw httpError(403, 'managers cannot process their own expense reports', 'SELF_APPROVAL');
-    }
-    if (report.status !== 'approved') {
-      throw httpError(409, 'only an approved report can be marked paid', 'REPORT_NOT_APPROVED');
-    }
-    await pool.query(
-      `UPDATE expense_reports SET status = 'paid', paid_at = now(), payment_ref = $2 WHERE id = $1`,
-      [report.id, (req.body && req.body.payment_ref) || null],
-    );
-    await insertEvent(pool, {
-      actor: req.user,
-      event: 'expense_change',
-      details: { action: 'report_pay', report_id: report.id, manager_id: req.manager.id },
-      ip: req.ip,
-    });
-    res.json({ report: await fetchReport(pool, report.id) });
-  } catch (err) {
-    sendErr(res, next, err);
-  }
-});
-
-// ---------------- mileage entries ----------------
-
-function entryFromBody(b, existing) {
-  const e = existing || {};
-  const pick = (key, cur) => (b[key] !== undefined ? b[key] : cur);
-  const out = {
-    entry_date: pick('entry_date', e.entry_date),
-    seq: pick('seq', e.seq ?? 0),
-    entry_kind: pick('entry_kind', e.entry_kind ?? 'business'),
-    start_address: pick('start_address', e.start_address ?? null),
-    end_address: pick('end_address', e.end_address ?? null),
-    start_lat: numOrNull(pick('start_lat', e.start_lat ?? null)),
-    start_lng: numOrNull(pick('start_lng', e.start_lng ?? null)),
-    end_lat: numOrNull(pick('end_lat', e.end_lat ?? null)),
-    end_lng: numOrNull(pick('end_lng', e.end_lng ?? null)),
-    appointment_id: numOrNull(pick('appointment_id', e.appointment_id ?? null)),
-    miles_toll: numOrNull(pick('miles_toll', e.miles_toll ?? null)),
-    miles_no_toll: numOrNull(pick('miles_no_toll', e.miles_no_toll ?? null)),
-    used_tollway: Boolean(pick('used_tollway', e.used_tollway ?? false)),
-    round_trip: Boolean(pick('round_trip', e.round_trip ?? false)),
-    business_miles: numOrNull(pick('business_miles', e.business_miles)),
-    rate_per_mile: numOrNull(pick('rate_per_mile', e.rate_per_mile ?? null)),
-    vehicle: pick('vehicle', e.vehicle ?? null),
-    notes: pick('notes', e.notes ?? null),
-  };
-  if (!isDateStr(out.entry_date)) {
-    throw httpError(400, 'entry_date must be a YYYY-MM-DD date', 'ENTRY_DATE_INVALID');
-  }
-  if (out.entry_kind !== 'business' && out.entry_kind !== 'commute') {
-    throw httpError(400, 'entry_kind must be business or commute', 'ENTRY_KIND_INVALID');
-  }
-  if (out.business_miles === null || out.business_miles < 0) {
-    throw httpError(400, 'business_miles must be a number ≥ 0', 'ENTRY_MILES_INVALID');
-  }
-  return out;
-}
-
-const ENTRY_COLS = [
-  'entry_date', 'seq', 'entry_kind', 'start_address', 'end_address',
-  'start_lat', 'start_lng', 'end_lat', 'end_lng', 'appointment_id',
-  'miles_toll', 'miles_no_toll', 'used_tollway', 'round_trip',
-  'business_miles', 'rate_per_mile', 'vehicle', 'notes',
-];
-
-router.post('/expense-reports/:id/mileage', async (req, res, next) => {
-  try {
-    const { report } = await loadOwnedDraft(req, res, next, { forWrite: true });
-    const v = entryFromBody(req.body || {});
-    const cols = ['expense_report_id', ...ENTRY_COLS];
-    const vals = [report.id, ...ENTRY_COLS.map((c) => v[c])];
-    const ph = cols.map((_, i) => `$${i + 1}`).join(', ');
-    const r = await pool.query(
-      `INSERT INTO mileage_entries (${cols.join(', ')}) VALUES (${ph}) RETURNING *`,
-      vals,
-    );
-    await insertEvent(pool, {
-      actor: req.user,
-      event: 'expense_change',
-      details: { action: 'mileage_add', report_id: report.id, entry_id: Number(r.rows[0].id) },
-      ip: req.ip,
-    });
-    res.status(201).json({ entry: normalizeEntry(r.rows[0]) });
-  } catch (err) {
-    sendErr(res, next, err);
-  }
-});
-
-async function loadEntry(req) {
-  const r = await pool.query(
-    'SELECT * FROM mileage_entries WHERE id = $1',
-    [req.params.entryId],
-  );
-  if (!r.rows.length || r.rows[0].deleted_at) {
-    throw httpError(404, 'mileage entry not found', 'ENTRY_NOT_FOUND');
-  }
-  return normalizeEntry(r.rows[0]);
-}
-
-router.put('/expense-reports/:id/mileage/:entryId', async (req, res, next) => {
-  try {
-    const { report } = await loadOwnedDraft(req, res, next, { forWrite: true });
-    const existing = await loadEntry(req);
-    if (Number(existing.expense_report_id) !== report.id) {
-      throw httpError(404, 'mileage entry not found', 'ENTRY_NOT_FOUND');
-    }
-    const v = entryFromBody(req.body || {}, existing);
-    const sets = ENTRY_COLS.map((c, i) => `${c} = $${i + 2}`).join(', ');
-    const r = await pool.query(
-      `UPDATE mileage_entries SET ${sets} WHERE id = $1 RETURNING *`,
-      [existing.id, ...ENTRY_COLS.map((c) => v[c])],
-    );
-    res.json({ entry: normalizeEntry(r.rows[0]) });
-  } catch (err) {
-    sendErr(res, next, err);
-  }
-});
-
-router.delete('/expense-reports/:id/mileage/:entryId', async (req, res, next) => {
-  try {
-    const { report } = await loadOwnedDraft(req, res, next, { forWrite: true });
-    const existing = await loadEntry(req);
-    if (Number(existing.expense_report_id) !== report.id) {
-      throw httpError(404, 'mileage entry not found', 'ENTRY_NOT_FOUND');
-    }
-    await pool.query('UPDATE mileage_entries SET deleted_at = now() WHERE id = $1', [existing.id]);
-    await insertEvent(pool, {
-      actor: req.user,
-      event: 'expense_change',
-      details: { action: 'mileage_delete', report_id: report.id, entry_id: existing.id },
-      ip: req.ip,
-    });
-    res.json({ entry: { ...existing, deleted_at: new Date().toISOString() } });
-  } catch (err) {
-    sendErr(res, next, err);
-  }
-});
-
-// ---------------- non-mileage expense lines ----------------
-
-const CATEGORIES = [
-  'mileage', 'parking', 'tolls', 'medical_supplies', 'office_supplies',
-  'meals', 'travel', 'lodging', 'phone_internet', 'training',
-  'licenses', 'other',
-];
-
-function expenseFromBody(b, existing) {
-  const e = existing || {};
-  const pick = (key, cur) => (b[key] !== undefined ? b[key] : cur);
-  const out = {
-    expense_date: pick('expense_date', e.expense_date),
-    category: pick('category', e.category),
-    description: pick('description', e.description ?? null),
-    vendor_name: pick('vendor_name', e.vendor_name ?? null),
-    amount_cents: pick('amount_cents', e.amount_cents),
-    payment_method: pick('payment_method', e.payment_method ?? null),
-    receipt_url: pick('receipt_url', e.receipt_url ?? null),
-    agency_id: numOrNull(pick('agency_id', e.agency_id ?? null)),
-    notes: pick('notes', e.notes ?? null),
-  };
-  if (!isDateStr(out.expense_date)) {
-    throw httpError(400, 'expense_date must be a YYYY-MM-DD date', 'EXPENSE_DATE_INVALID');
-  }
-  if (!CATEGORIES.includes(out.category)) {
-    throw httpError(400, 'unknown expense category', 'EXPENSE_CATEGORY_INVALID');
-  }
-  if (!Number.isInteger(out.amount_cents) || out.amount_cents < 0) {
-    throw httpError(400, 'amount_cents must be an integer ≥ 0', 'EXPENSE_AMOUNT_INVALID');
-  }
-  return out;
-}
-
-const EXPENSE_COLS = [
-  'expense_date', 'category', 'description', 'vendor_name',
-  'amount_cents', 'payment_method', 'receipt_url', 'agency_id', 'notes',
-];
-
-router.post('/expense-reports/:id/expenses', async (req, res, next) => {
-  try {
-    const { me, report } = await loadOwnedDraft(req, res, next, { forWrite: true });
-    const v = expenseFromBody(req.body || {});
-    const cols = ['report_id', 'user_id', ...EXPENSE_COLS];
-    const vals = [report.id, me.id, ...EXPENSE_COLS.map((c) => v[c])];
-    const ph = cols.map((_, i) => `$${i + 1}`).join(', ');
-    const r = await pool.query(
-      `INSERT INTO expenses (${cols.join(', ')}) VALUES (${ph}) RETURNING *`,
-      vals,
-    );
-    res.status(201).json({ expense: normalizeExpense(r.rows[0]) });
-  } catch (err) {
-    sendErr(res, next, err);
-  }
-});
-
-async function loadExpenseLine(req) {
-  const r = await pool.query('SELECT * FROM expenses WHERE id = $1', [req.params.expenseId]);
-  if (!r.rows.length || r.rows[0].deleted_at) {
-    throw httpError(404, 'expense line not found', 'EXPENSE_NOT_FOUND');
-  }
-  return normalizeExpense(r.rows[0]);
-}
-
-router.put('/expense-reports/:id/expenses/:expenseId', async (req, res, next) => {
-  try {
-    const { report } = await loadOwnedDraft(req, res, next, { forWrite: true });
-    const existing = await loadExpenseLine(req);
-    if (Number(existing.report_id) !== report.id) {
-      throw httpError(404, 'expense line not found', 'EXPENSE_NOT_FOUND');
-    }
-    const v = expenseFromBody(req.body || {}, existing);
-    const sets = EXPENSE_COLS.map((c, i) => `${c} = $${i + 2}`).join(', ');
-    const r = await pool.query(
-      `UPDATE expenses SET ${sets} WHERE id = $1 RETURNING *`,
-      [existing.id, ...EXPENSE_COLS.map((c) => v[c])],
-    );
-    res.json({ expense: normalizeExpense(r.rows[0]) });
-  } catch (err) {
-    sendErr(res, next, err);
-  }
-});
-
-router.delete('/expense-reports/:id/expenses/:expenseId', async (req, res, next) => {
-  try {
-    const { report } = await loadOwnedDraft(req, res, next, { forWrite: true });
-    const existing = await loadExpenseLine(req);
-    if (Number(existing.report_id) !== report.id) {
-      throw httpError(404, 'expense line not found', 'EXPENSE_NOT_FOUND');
-    }
-    await pool.query('UPDATE expenses SET deleted_at = now() WHERE id = $1', [existing.id]);
-    res.json({ expense: { ...existing, deleted_at: new Date().toISOString() } });
-  } catch (err) {
-    sendErr(res, next, err);
-  }
-});
-
-// ---------------- routing ----------------
-
-// POST /mileage/route { start_lat, start_lng, end_lat, end_lng }
-// → { miles_toll, miles_no_toll } (either may be null when
-// only one variant routed). Coordinates only — address text
-// is geocoded by the client (autocomplete / GPS picks carry
-// coordinates in this app).
-router.post('/mileage/route', async (req, res, next) => {
-  try {
-    await resolveMe(pool, req);
-    const b = req.body || {};
-    const from = { lat: numOrNull(b.start_lat), lng: numOrNull(b.start_lng) };
-    const to = { lat: numOrNull(b.end_lat), lng: numOrNull(b.end_lng) };
-    if (from.lat === null || from.lng === null || to.lat === null || to.lng === null) {
-      throw httpError(400, 'start and end coordinates are required', 'ROUTE_COORDS_REQUIRED');
-    }
-    const { milesToll, milesNoToll } = await routeLeg(from, to);
-    res.json({
-      miles_toll: milesToll === null ? null : Math.round(milesToll * 100) / 100,
-      miles_no_toll: milesNoToll === null ? null : Math.round(milesNoToll * 100) / 100,
-    });
-  } catch (err) {
-    if (err.code === 'ROUTE_FAILED') {
-      return res.status(502).json({ error: err.message, code: err.code });
-    }
-    return sendErr(res, next, err);
   }
 });
 

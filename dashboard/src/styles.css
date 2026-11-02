@@ -3533,3 +3533,331 @@ label.contact-picker-row {
 .force-desktop .patient-list-panel .agency-search-row {
   display: block;
 }
+
+/* ---- Mileage day-chain log (2026-11-02 simplification) ---- */
+.btn-small {
+  padding: 5px 10px;
+  font-size: 12.5px;
+}
+.mlg-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: end;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+.mlg-controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.mlg-controls input,
+.mlg-controls select {
+  font-size: 14px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 500;
+}
+.mlg-chain {
+  padding: 8px 0 4px;
+  margin-bottom: 14px;
+}
+.mlg-empty {
+  padding: 18px 16px;
+  color: var(--muted);
+  font-size: 14px;
+}
+.mlg-stop {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 12px;
+  align-items: center;
+  padding: 12px 16px 4px;
+}
+.mlg-stop-main {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.mlg-stop-kind {
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.mlg-stop-addr {
+  font-size: 12.5px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mlg-stop-actions {
+  display: flex;
+  gap: 6px;
+}
+.mlg-editor {
+  grid-column: 1 / -1;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--panel-2);
+}
+.mlg-editor input[type="text"] {
+  font-size: 14px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+}
+.mlg-chips {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.mlg-patient-results {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.mlg-patient-results button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 8px 11px;
+  background: var(--panel);
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  text-align: left;
+  color: var(--text);
+}
+.mlg-patient-results button:last-child {
+  border-bottom: 0;
+}
+.mlg-patient-results button span {
+  font-size: 12px;
+  color: var(--muted);
+}
+.mlg-editor-actions {
+  display: flex;
+  gap: 8px;
+}
+.mlg-leg {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 2px 16px 2px 34px;
+  padding: 8px 12px;
+  border-left: 3px solid var(--teal);
+  background: var(--panel-2);
+  border-radius: 0 8px 8px 0;
+}
+.mlg-leg-fixed {
+  border-left-color: var(--border);
+}
+.mlg-arrow {
+  color: var(--muted);
+  font-size: 13px;
+}
+.mlg-leg-miles {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.mlg-leg-miles input {
+  width: 74px;
+  font-size: 15px;
+  font-weight: 700;
+  text-align: right;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+}
+.mlg-seg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.mlg-seg button {
+  border: 0;
+  background: var(--panel);
+  padding: 6px 11px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+}
+.mlg-seg button.on {
+  background: var(--teal);
+  color: #fff;
+}
+.mlg-seg button.on.alt {
+  background: var(--amber);
+}
+.mlg-leg-note {
+  font-size: 12px;
+  color: var(--muted);
+}
+.mlg-badge {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 0;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.mlg-badge-bill {
+  background: var(--nav-active-bg);
+  color: var(--nav-active-text);
+}
+.mlg-badge-pers {
+  background: var(--panel-2);
+  color: var(--muted);
+  border: 1px solid var(--border);
+}
+.mlg-addstop {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 12px 16px 14px;
+}
+.mlg-hint {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.mlg-totals {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.mlg-total {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.mlg-total span {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.mlg-total strong {
+  font-size: 20px;
+}
+.mlg-total-hero {
+  border-color: var(--teal);
+  background: var(--nav-active-bg);
+}
+.mlg-report {
+  padding: 16px;
+}
+.mlg-report h2 {
+  font-size: 16px;
+  margin-bottom: 12px;
+}
+.mlg-report .mlg-controls {
+  padding: 0;
+  margin-bottom: 6px;
+}
+.mlg-print h3 {
+  font-size: 14.5px;
+  margin: 12px 0 8px;
+}
+.mlg-day {
+  border-top: 1px solid var(--border);
+  padding: 10px 0 4px;
+}
+.mlg-day-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 13.5px;
+  margin-bottom: 6px;
+}
+.mlg-day-head span {
+  color: var(--muted);
+}
+.mlg-day-head span strong {
+  color: var(--text);
+}
+.mlg-day-leg {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--muted);
+  padding: 2.5px 0 2.5px 14px;
+}
+.mlg-report-total {
+  border-top: 2px solid var(--border);
+  padding-top: 10px;
+  margin-top: 6px;
+}
+@media (max-width: 720px) {
+  .mlg-totals {
+    grid-template-columns: 1fr 1fr;
+  }
+  .mlg-leg {
+    margin-left: 16px;
+  }
+  .mlg-badge {
+    margin-left: 0;
+  }
+  .mlg-controls label {
+    flex: 1 1 40%;
+  }
+}
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .mlg-print,
+  .mlg-print * {
+    visibility: visible;
+  }
+  .mlg-print {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 12px;
+  }
+}

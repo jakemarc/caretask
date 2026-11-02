@@ -142,65 +142,61 @@ aborts only this pass, recorded as `cms_error` in the event
 details alongside `cms_rows` / `cms_matched` /
 `cms_unmatched` counts.
 
-## Expense reports (routes/expenses.js, built locally 2026-11-01)
+## Mileage day log + generated reports (routes/expenses.js)
 
-Jake's model: one report per clinician per period (usually a
-month); mileage entries and non-mileage lines live inside it;
-the report is submitted, approved, and paid AS A WHOLE.
-Mounted at root in server.js (the router carries its own
-prefixes). Every route requires the caller to resolve to an
-active users row (403 `NO_STAFF_RECORD` otherwise).
+LIVE via deploy-27 (2026-11-02): migration applied on the
+VM; the pre-existing test envelope data (report #1 + its 2
+entries) was wiped at Jake's direction — it was
+form-testing data — so the log starts clean.
 
-- `GET /expense-reports` — own reports; manager/admin roles
-  get everyone's (they run approval/payment). Bare array,
-  newest period first, soft-deleted excluded.
-- `POST /expense-reports` — create a draft (period required,
-  end ≥ start else 400 `PERIOD_INVALID`; title/agency
-  optional). The id is auto-generated.
-- `GET /expense-reports/:id` — the report PLUS its computed
-  summary: `days` (entries grouped by date with driven /
-  commute / reimbursable miles), `expenses` (lines), and
-  totals (`total_driven_miles`, `total_commute_miles`,
-  `total_reimbursable_miles`, `mileage_amount_cents`,
-  `expenses_amount_cents`, `total_amount_cents`). Non-owners
-  who aren't managers get 404 (existence isn't leaked).
-- `PUT /expense-reports/:id`, `DELETE /expense-reports/:id`
-  (soft) — owner only, draft only (409 `REPORT_LOCKED` after
-  submit).
-- `POST /expense-reports/:id/mileage` ·
-  `PUT|DELETE /expense-reports/:id/mileage/:entryId` —
-  mileage entries. `entry_kind` business | commute;
-  `business_miles` is the leg's FINAL miles (≥ 0, required);
-  both routing figures (`miles_toll`, `miles_no_toll`),
-  `used_tollway`, `round_trip`, and a `rate_per_mile`
-  snapshot ride along.
-- `POST /expense-reports/:id/expenses` ·
-  `PUT|DELETE /expense-reports/:id/expenses/:expenseId` —
-  non-mileage lines (category CHECK list, `amount_cents`
-  integer ≥ 0).
-- Lifecycle: `POST /:id/submit` (owner; draft → submitted,
-  stamps submitted_at) · `POST /:id/approve` (manager role;
-  records approved_by/at) · `POST /:id/reject` (manager role;
-  returns the report to draft, clears submitted_at) ·
-  `POST /:id/pay` (manager role; approved → paid, optional
-  payment_ref). Approve/reject/pay additionally refuse the
-  report's OWN owner with 403 `SELF_APPROVAL` — a manager
-  cannot process their own report (Jake's two accounts are
-  separate users rows, so one can still process the other's).
-- **Day math:** daily reimbursable = max(0, driven −
-  commute). Mileage dollars: when every entry carries a rate
-  (the normal one-rate month), each day claims
-  reimbursable × that day's rate, so a commute-heavy day can
-  never go negative; unrated entries count miles but no
-  dollars.
+Simplified 2026-11-02 (Jake): NO approval process. Mileage is
+a per-clinician DAY LOG of legs (a chain), top-level since
+`schema-mileage-chains.sql` (legs carry `user_id`, `agency_id`,
+`patient_id`, `start_label`/`end_label`; `expense_report_id`
+is nullable and legacy-only). Mounted at root in server.js.
+Every route requires the caller to resolve to an active users
+row (403 `NO_STAFF_RECORD` otherwise).
+
+- A day's legs in `seq` order form the chain: `entry_kind`
+  'commute' legs are the fixed home<->office bookends
+  (personal miles, never billed); 'business' legs are
+  billable. `business_miles` is the leg's FINAL miles for
+  both kinds; `miles_toll` / `miles_no_toll` keep both routed
+  figures and `used_tollway` says which was driven (default
+  tollway); `rate_per_mile` is a per-leg snapshot.
+- `GET /mileage?from&to&agency_id&user_id` — legs in range
+  (date / agency filters optional). Own legs; manager/admin
+  may pass `user_id` for another clinician (403 otherwise).
+- `POST /mileage` · `PUT|DELETE /mileage/:id` — leg create /
+  owner-only update / owner-only soft delete. Agency and
+  patient references are validated (400 `AGENCY_NOT_FOUND` /
+  `PATIENT_NOT_FOUND`); coordinates are range-checked.
+- `GET /mileage/report?from&to&agency_id&user_id` — a
+  GENERATED report (range required, 400 `RANGE_REQUIRED`):
+  days grouped with `billable_miles` / `personal_miles` /
+  `driven_miles` / `amount_cents`, plus totals. Dollars come
+  only from rated BUSINESS legs (miles x rate); personal
+  legs never pay. Nothing is stored or locked — the report
+  is computed from the log on demand.
 - `POST /mileage/route` — `{start_lat, start_lng, end_lat,
-  end_lng}` → `{miles_toll, miles_no_toll}` from the public
+  end_lng}` -> `{miles_toll, miles_no_toll}` from the public
   Valhalla instance (lib/routing.js; either figure may be
-  null; both failing → 502 `ROUTE_FAILED`). Coordinates only;
-  demo-grade by design — miles are always hand-enterable.
+  null; both failing -> 502 `ROUTE_FAILED`). Coordinates
+  only; demo-grade by design — miles are always
+  hand-enterable.
+- LEGACY envelope reads (read-only, pre-simplification
+  monthly reports): `GET /expense-reports` (own; managers
+  everyone's) and `GET /expense-reports/:id` with the
+  ORIGINAL summary math (daily reimbursable = max(0,
+  driven - commute); dollars per the all-rated day rule).
+  All envelope writes, the submit/approve/reject/pay
+  lifecycle, and the non-mileage expense-line endpoints are
+  REMOVED (404); the tables and their data stay untouched.
+  Non-mileage lines are parked with the envelopes.
 - Events: `expense_change` with ids + action only — never
-  addresses, amounts, or notes. Suite: `e2e-expenses-test.js`
-  (42 checks, all passing locally 2026-11-01).
+  addresses, amounts, or notes. Suite:
+  `e2e-expenses-test.js` (45 checks, all passing locally
+  2026-11-02).
 
 ## Role gates (lib/requireRole.js) — replaced the manager-PIN gate 2026-11-02
 
