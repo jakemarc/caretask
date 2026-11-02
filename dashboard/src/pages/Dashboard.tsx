@@ -18,10 +18,12 @@ import {
   ClipboardCheck,
   Clock,
   Flag as FlagIcon,
+  Filter,
   HeartPulse,
   LayoutDashboard,
   LifeBuoy,
   Mail,
+  Menu,
   Monitor,
   Moon,
   Navigation,
@@ -29,12 +31,14 @@ import {
   Phone,
   Plus,
   Receipt,
+  Route,
   Search,
   Settings,
   Siren,
   Smartphone,
   Sun,
   Users,
+  X,
   XCircle,
 } from "lucide-react";
 import {
@@ -407,6 +411,17 @@ export default function Dashboard({
   // until 2026-11-01, when the submenu was removed entirely
   // and Patients became a direct sidebar button.
   const [query, setQuery] = useState("");
+  // Mobile view (Jake, 2026-11-02): drawer state for the floating
+  // menu button, the Patients status filter (funnel; defaults to
+  // Active — search overrides it, see mobilePeople), its popover,
+  // and whether Expenses was opened from the Mileage pill (which
+  // auto-opens the current month's report).
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [patientStatusFilter, setPatientStatusFilter] = useState<
+    "active" | "hold" | "discharged" | "all"
+  >("active");
+  const [filterPanelOpen, setFilterPanelOpen] = useState(false);
+  const [expensesAutoOpen, setExpensesAutoOpen] = useState(false);
   const listSearchRef = useRef<HTMLInputElement>(null);
   const [people, setPeople] = useState<PersonUnderCare[]>(peopleUnderCare);
   const [selectedId, setSelectedId] = useState(peopleUnderCare[0].id);
@@ -1678,6 +1693,18 @@ export default function Dashboard({
     return av < bv ? -listSort.dir : av > bv ? listSort.dir : 0;
   });
 
+  // Mobile Patients cards (Jake, 2026-11-02): the funnel status
+  // filter applies ONLY while not searching — a name search
+  // searches all patients (every status) and overrides the filter.
+  const searching = q.length > 0;
+  const mobilePeople = searching
+    ? sortedPeople
+    : sortedPeople.filter(
+        (p) =>
+          patientStatusFilter === "all" ||
+          (p.patientStatus ?? "active") === patientStatusFilter,
+      );
+
   const selectedPerson =
     people.find((p) => p.id === selectedId) ??
     people[0] ?? {
@@ -1765,6 +1792,45 @@ export default function Dashboard({
         </div>
       </header>
 
+      {/* Mobile floating chrome (Jake, 2026-11-02): shown only at
+          phone widths (styles.css); the desktop header/sidebar
+          arrangement is untouched, and .force-desktop hides all
+          of this. Menu circle (top-left) opens the sidebar as a
+          drawer; view circle (top-right) is the same desktop-view
+          toggle as the header button. */}
+      {mobileMenuOpen && (
+        <div
+          className="mobile-scrim"
+          onClick={() => setMobileMenuOpen(false)}
+        />
+      )}
+      <button
+        type="button"
+        className="mobile-fab mobile-menu-btn"
+        aria-label="Open menu"
+        title="Menu"
+        onClick={() => setMobileMenuOpen(true)}
+      >
+        <Menu size={21} />
+      </button>
+      <button
+        type="button"
+        className="mobile-fab mobile-view-btn"
+        aria-label={
+          forceDesktop
+            ? "Switch back to the mobile layout"
+            : "Show the desktop layout"
+        }
+        title={
+          forceDesktop
+            ? "Switch back to the mobile layout"
+            : "Show the desktop layout"
+        }
+        onClick={() => setForceDesktop(!forceDesktop)}
+      >
+        {forceDesktop ? <Smartphone size={21} /> : <Monitor size={21} />}
+      </button>
+
       {/* The DEMO DATA banner and the placeholder KPI/metrics
           row that used to sit between the header and the body
           were removed at Jake's direction (2026-10-31); their
@@ -1772,7 +1838,17 @@ export default function Dashboard({
 
       <div className="dashboard-body">
         <aside
-          className={sidebarCollapsed ? "sidebar collapsed" : "sidebar"}
+          className={
+            (sidebarCollapsed ? "sidebar collapsed" : "sidebar") +
+            (mobileMenuOpen ? " mobile-open" : "")
+          }
+          onClick={(e) => {
+            // Drawer mode (mobile): any nav tap also closes the
+            // drawer. Harmless on desktop (the state is already
+            // false and the class only styles at phone widths).
+            if ((e.target as HTMLElement).closest("button"))
+              setMobileMenuOpen(false);
+          }}
         >
           {/* "Main Menu" label and the collapse chevron share one
               row (Jake, 2026-10-31): label left, chevron right.
@@ -1881,7 +1957,10 @@ export default function Dashboard({
                 behind it. */}
             <button
               className={tab === "expenses" ? "nav-btn active" : "nav-btn"}
-              onClick={() => setTab("expenses")}
+              onClick={() => {
+                setExpensesAutoOpen(false);
+                setTab("expenses");
+              }}
               title="Expenses"
             >
               <span className="nav-icon"><Receipt size={20} /></span>
@@ -1925,6 +2004,29 @@ export default function Dashboard({
               <span className="nav-label">Help Center</span>
             </button>
           </nav>
+          {/* Drawer-only actions (mobile): theme + sign out live
+              in the header on desktop; in the mobile drawer they
+              sit at the foot of the menu. */}
+          <div className="drawer-actions">
+            <button
+              type="button"
+              className="nav-btn"
+              onClick={onToggleTheme}
+            >
+              {theme === "light" ? <Moon size={17} /> : <Sun size={17} />}
+              <span className="nav-label">
+                {theme === "light" ? "Dark mode" : "Light mode"}
+              </span>
+            </button>
+            <button
+              type="button"
+              className="nav-btn"
+              onClick={handleSignOut}
+            >
+              <X size={17} />
+              <span className="nav-label">Sign out</span>
+            </button>
+          </div>
         </aside>
 
         <main className="app-main">
@@ -2505,6 +2607,80 @@ export default function Dashboard({
             // the Dashboard overview.
             <section className="people-layout single">
               <div className="patient-list-panel">
+                {/* Mobile floating search (Jake, 2026-11-02):
+                    translucent, fixed under the title row, with
+                    the funnel status filter at its right end.
+                    Shares the query state with the desktop search
+                    below (which phones hide). Search searches ALL
+                    patients and overrides the status filter. */}
+                <div className="patients-floating-search">
+                  <Search size={17} />
+                  <input
+                    type="search"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="Search patients…"
+                    aria-label="Search patients"
+                  />
+                  {query && (
+                    <button
+                      type="button"
+                      className="pfs-clear"
+                      aria-label="Clear search"
+                      onClick={() => setQuery("")}
+                    >
+                      <XCircle size={17} />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="pfs-funnel"
+                    aria-label="Filter patients by status"
+                    title="Filter by status"
+                    onClick={() => setFilterPanelOpen(!filterPanelOpen)}
+                  >
+                    <Filter size={18} />
+                    {patientStatusFilter !== "active" && (
+                      <span className="pfs-badge" />
+                    )}
+                  </button>
+                </div>
+                {filterPanelOpen && (
+                  <div className="patients-filter-popover">
+                    <p className="pfp-label">Status</p>
+                    <div className="pfp-chips">
+                      {(
+                        [
+                          ["active", "Active"],
+                          ["hold", "On hold"],
+                          ["discharged", "Discharged"],
+                          ["all", "All statuses"],
+                        ] as const
+                      ).map(([value, label]) => (
+                        <button
+                          key={value}
+                          type="button"
+                          className={
+                            patientStatusFilter === value
+                              ? "pfp-chip on"
+                              : "pfp-chip"
+                          }
+                          onClick={() => {
+                            setPatientStatusFilter(value);
+                            setFilterPanelOpen(false);
+                          }}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <p className="section-note mobile-count-note">
+                  {searching
+                    ? `${visiblePeople.length} matching ${visiblePeople.length === 1 ? "person" : "people"} — searching all patients`
+                    : `${mobilePeople.length} ${patientStatusFilter === "active" ? "active patients" : patientStatusFilter === "hold" ? "patients on hold" : patientStatusFilter === "discharged" ? "discharged patients" : "patients · all statuses"}`}
+                </p>
                 <div className="page-head list-page-head">
                   <h1>Patients</h1>
                   {/* Add Patient lives on the page now (Jake,
@@ -2669,6 +2845,77 @@ export default function Dashboard({
                     })}
                   </tbody>
                 </table>
+                {/* Mobile patient cards (Jake, 2026-11-02): zone
+                    dot + name (+ status word when not active) +
+                    directions/call buttons; NO address on the
+                    card. Tap opens the profile, same as a row. */}
+                <div className="patient-cards">
+                  {mobilePeople.map((p) => {
+                    const directionsUrl = mapsDirectionsUrl(p);
+                    const mainPhone = telHref(p.phoneHome)
+                      ? p.phoneHome
+                      : p.phoneCell;
+                    const callHref = telHref(mainPhone);
+                    const lifecycle = p.patientStatus ?? "active";
+                    return (
+                      <div
+                        key={p.id}
+                        className="patient-card"
+                        role="button"
+                        title={statusLabel(p.status)}
+                        onClick={() => {
+                          setSelectedId(p.id);
+                          setTab("profile");
+                        }}
+                      >
+                        <span className={`dot dot-${p.status}`} />
+                        <span className="pc-main">
+                          <span className="patient-name">
+                            {listName(p)}
+                          </span>
+                          {lifecycle !== "active" && (
+                            <span className="pc-status">
+                              {lifecycle === "hold"
+                                ? "On hold"
+                                : "Discharged"}
+                            </span>
+                          )}
+                        </span>
+                        {directionsUrl ? (
+                          <a
+                            className="pc-icon-btn"
+                            href={directionsUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            aria-label={`Directions to ${p.name}`}
+                            title="Directions"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <Navigation size={18} />
+                          </a>
+                        ) : null}
+                        {callHref ? (
+                          <a
+                            className="pc-icon-btn"
+                            href={callHref}
+                            aria-label={`Call ${p.name}`}
+                            title={`Call ${formatUSPhone(mainPhone ?? "")}`}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <Phone size={18} />
+                          </a>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                  {mobilePeople.length === 0 && (
+                    <p className="section-note">
+                      {searching
+                        ? "No patients match that search."
+                        : "No patients with that status."}
+                    </p>
+                  )}
+                </div>
                 {sortedPeople.length === 0 && (
                   <p className="section-note">
                     No patients match that search.
@@ -2686,6 +2933,55 @@ export default function Dashboard({
                   List tab (row click → profile). The heading
                   stays — it reads cleanly above the card. */}
               <h1 className="profile-heading">Patient Profile</h1>
+              {/* Mobile vertical action pill (Jake, 2026-11-02):
+                  floating on the right edge, icons only — Call,
+                  Directions, Edit. Phone widths only (styles.css);
+                  the handlers mirror the profile's own buttons. */}
+              {(() => {
+                const mainPhone = telHref(selectedPerson.phoneHome)
+                  ? selectedPerson.phoneHome
+                  : selectedPerson.phoneCell;
+                const callHref = telHref(mainPhone);
+                const directionsUrl = mapsDirectionsUrl(selectedPerson);
+                return (
+                  <div className="profile-vpill">
+                    {callHref ? (
+                      <a
+                        className="vpill-btn primary"
+                        href={callHref}
+                        aria-label={`Call ${selectedPerson.name}`}
+                        title={`Call ${formatUSPhone(mainPhone ?? "")}`}
+                      >
+                        <Phone size={20} />
+                      </a>
+                    ) : null}
+                    {directionsUrl ? (
+                      <a
+                        className="vpill-btn"
+                        href={directionsUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        aria-label={`Directions to ${selectedPerson.name}`}
+                        title="Directions"
+                      >
+                        <Navigation size={20} />
+                      </a>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="vpill-btn"
+                      aria-label="Edit patient"
+                      title="Edit patient"
+                      onClick={() => {
+                        if (!pinGate && !editing && !confirmingDelete)
+                          openPinGate("edit");
+                      }}
+                    >
+                      <Pencil size={20} />
+                    </button>
+                  </div>
+                );
+              })()}
               <article className="profile-card">
                 <div
                   className="profile-head tappable"
@@ -3836,6 +4132,7 @@ export default function Dashboard({
               user={user}
               people={people}
               apiConnected={apiStatus === "connected"}
+              autoOpenCurrent={expensesAutoOpen}
             />
           )}
 
@@ -4192,6 +4489,48 @@ export default function Dashboard({
           )}
         </main>
       </div>
+
+      {/* Mobile floating pill footer (Jake, 2026-11-02): the four
+          everyday destinations. Mileage opens Expenses flagged to
+          auto-open the current month's report. Phone widths only
+          (styles.css). */}
+      <nav className="mobile-pill" aria-label="Main">
+        <button
+          type="button"
+          className={tab === "dashboard" ? "mp-item active" : "mp-item"}
+          onClick={() => setTab("dashboard")}
+        >
+          <LayoutDashboard size={21} />
+          <span>Dashboard</span>
+        </button>
+        <button
+          type="button"
+          className={patientActive ? "mp-item active" : "mp-item"}
+          onClick={() => setTab("list")}
+        >
+          <Users size={21} />
+          <span>Patients</span>
+        </button>
+        <button
+          type="button"
+          className={tab === "expenses" ? "mp-item active" : "mp-item"}
+          onClick={() => {
+            setExpensesAutoOpen(true);
+            setTab("expenses");
+          }}
+        >
+          <Route size={21} />
+          <span>Mileage</span>
+        </button>
+        <button
+          type="button"
+          className={tab === "appointment" ? "mp-item active" : "mp-item"}
+          onClick={() => setTab("appointment")}
+        >
+          <CalendarDays size={21} />
+          <span>Calendar</span>
+        </button>
+      </nav>
     </div>
   );
 }
