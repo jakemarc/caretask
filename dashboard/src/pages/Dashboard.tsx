@@ -755,42 +755,24 @@ export default function Dashboard({
     useState<ApiUser | null>(null);
   const [deactivateError, setDeactivateError] = useState("");
 
-  // Load the staff directory when the Clinician tab opens; leaving
-  // the tab closes any open panel.
+  // Load the staff directory for every tab that needs it: the
+  // Clinician tab (management), Contacts (the same rows read-only),
+  // and Appointment — the appointment form's Provider picker is fed
+  // by these rows, and it rendered EMPTY when the calendar was
+  // opened without visiting Clinician/Contacts first (Jake's
+  // report, 2026-11-02; fixed in deploy-30 by loading here too).
+  // Leaving the Clinician tab closes any open panel.
   useEffect(() => {
-    if (tab === "contacts") {
-      // Contacts is the real staff directory in read-only form —
-      // load the same users rows the Clinician tab uses.
+    const needsStaff =
+      tab === "clinician" || tab === "contacts" || tab === "appointment";
+    setStaffNotice("");
+    setStaffForm(null);
+    setConfirmingDeactivate(null);
+    setDeactivateError("");
+    if (!needsStaff) return;
+    if (apiStatus !== "connected" || !user) {
       // Unreachable API → staff stays null and the page says the
       // directory is unavailable.
-      setStaffNotice("");
-      setStaffForm(null);
-      setConfirmingDeactivate(null);
-      setDeactivateError("");
-      if (apiStatus !== "connected" || !user) {
-        setStaff(null);
-        return;
-      }
-      let cancelled = false;
-      listUsers(user)
-        .then((rows) => {
-          if (!cancelled) setStaff(rows);
-        })
-        .catch(() => {
-          if (!cancelled) setStaff(null);
-        });
-      return () => {
-        cancelled = true;
-      };
-    }
-    if (tab !== "clinician") {
-      setStaffNotice("");
-      setStaffForm(null);
-      setConfirmingDeactivate(null);
-      setDeactivateError("");
-      return;
-    }
-    if (apiStatus !== "connected" || !user) {
       setStaff(null);
       return;
     }
@@ -802,12 +784,14 @@ export default function Dashboard({
       .catch(() => {
         if (!cancelled) setStaff(null);
       });
-    // Keep the Messages nav badge roughly current.
-    listMessages(user, { unread: true })
-      .then((out) => {
-        if (!cancelled) setUnreadCount(out.messages.length);
-      })
-      .catch(() => {});
+    if (tab === "clinician") {
+      // Keep the Messages nav badge roughly current.
+      listMessages(user, { unread: true })
+        .then((out) => {
+          if (!cancelled) setUnreadCount(out.messages.length);
+        })
+        .catch(() => {});
+    }
     return () => {
       cancelled = true;
     };

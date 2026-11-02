@@ -6,6 +6,22 @@ built and verified but not deployed.
 
 ## 2026-11-02
 
+- **Provider-picker hotfix — Live 2026-11-02 (deploy-30:
+  dashboard-only, bundle `index-sXq1oXPP.js`, deployment
+  https://c4110435.marcinnotech-app.pages.dev, verified —
+  Cloudflare API canonical deployment matches, deployment URL
+  serves the new bundle, main-domain asset 200, API /health
+  green).** Jake reported the appointment form's Provider
+  dropdown empty ("no clinician is coming out"). Root cause
+  (in the source): the staff directory behind the picker was
+  loaded only when the Clinician or Contacts tab opened, so
+  going straight to Appointment after sign-in — the normal
+  flow — left the list unfetched and the picker with only
+  "Unassigned". Fix (Dashboard.tsx): the staff-loader effect
+  now also runs for the Appointment tab (one shared load path
+  for clinician / contacts / appointment; the Clinician tab
+  still refreshes the Messages badge). No API change.
+
 - **Reveal-menu hotfix — Live 2026-11-02 (deploy-29:
   dashboard-only, bundle `index-Dhj0ZcU7.js`, deployment
   https://6e3f9ff9.marcinnotech-app.pages.dev, verified —
