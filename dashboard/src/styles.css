@@ -1118,6 +1118,7 @@ input {
 }
 
 .force-desktop .app-main {
+  padding-top: 20px;
   padding-bottom: 48px;
 }
 
@@ -3057,6 +3058,7 @@ label.contact-picker-row {
 
 .mobile-fab,
 .mobile-pill,
+.mobile-topbar,
 .mobile-scrim,
 .patients-floating-search,
 .patients-filter-popover,
@@ -3073,7 +3075,67 @@ label.contact-picker-row {
   }
 
   .app-main {
-    padding: 20px 16px 118px;
+    padding: 88px 16px 118px;
+  }
+
+  /* The standard mobile header (Jake, 2026-11-02): a fixed
+     glass bar on every view. The menu/view circles (z 60) sit
+     ON it (z 59); the title is centered and truncates before it
+     can reach the circles; taps pass through except the Add
+     Patient circle. Per-view page-head titles are hidden at
+     phone widths — the bar is the title. */
+  .mobile-topbar {
+    display: flex;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 72px;
+    z-index: 59;
+    align-items: center;
+    justify-content: center;
+    background: color-mix(in srgb, var(--panel) 82%, transparent);
+    -webkit-backdrop-filter: blur(14px);
+    backdrop-filter: blur(14px);
+    border-bottom: 1px solid var(--border);
+    box-shadow: 0 6px 20px rgba(10, 25, 22, 0.1);
+    pointer-events: none;
+  }
+
+  .mobile-topbar-title {
+    font-size: 17px;
+    font-weight: 700;
+    color: var(--text);
+    max-width: calc(100% - 196px);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .mobile-topbar-add {
+    position: absolute;
+    right: 70px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text);
+    background: color-mix(in srgb, var(--panel) 62%, transparent);
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--border);
+    box-shadow: 0 4px 14px rgba(10, 25, 22, 0.16);
+    cursor: pointer;
+    pointer-events: auto;
+  }
+
+  .app-main .page-head h1 {
+    display: none;
   }
 
   /* Sidebar: hidden until the menu button opens it as a drawer. */
@@ -3326,7 +3388,7 @@ label.contact-picker-row {
 
   .mobile-count-note {
     display: block;
-    margin: 128px 0 10px;
+    margin: 60px 0 10px;
   }
 
   /* Title fix (Jake, 2026-11-02): the page head rendered AFTER
@@ -3347,44 +3409,11 @@ label.contact-picker-row {
      put while the list scrolls under it. The strip itself never
      intercepts taps; only the Add Patient button (parked at the
      strip's right end, just left of the toggle circle) is live. */
-  /* Docked BAR (Jake, 2026-11-02, superseding the deploy-22
-     pill): the page head is a full-width fixed bar across the
-     top. The floating menu/toggle circles (z 60) sit ON the bar
-     (z 59), so the title can never slide under them; the bar is
-     one coherent piece of chrome. Taps pass through except on
-     the Add Patient button, parked left of the toggle circle. */
+  /* The Patients page head hides at phone widths: the shell's
+     docked bar carries the title and the Add Patient circle
+     (standard mobile header, 2026-11-02). */
   .patient-list-panel .list-page-head {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 72px;
-    padding: 0 14px;
-    z-index: 59;
-    margin: 0;
-    align-items: center;
-    justify-content: center;
-    background: color-mix(in srgb, var(--panel) 82%, transparent);
-    -webkit-backdrop-filter: blur(14px);
-    backdrop-filter: blur(14px);
-    border-bottom: 1px solid var(--border);
-    box-shadow: 0 6px 20px rgba(10, 25, 22, 0.1);
-    pointer-events: none;
-  }
-
-  .patient-list-panel .list-page-head h1 {
-    font-size: 17px;
-    font-weight: 700;
-    line-height: 1;
-    color: var(--text);
-  }
-
-  .patient-list-panel .list-page-head .add-patient-btn {
-    position: absolute;
-    right: 70px;
-    top: 50%;
-    transform: translateY(-50%);
-    pointer-events: auto;
+    display: none;
   }
 
   .patient-cards {
@@ -3470,6 +3499,7 @@ label.contact-picker-row {
    desktop Patients arrangement (search row + table) is restored. */
 .force-desktop .mobile-fab,
 .force-desktop .mobile-pill,
+.force-desktop .mobile-topbar,
 .force-desktop .mobile-scrim,
 .force-desktop .patients-floating-search,
 .force-desktop .patients-filter-popover,
@@ -3493,34 +3523,11 @@ label.contact-picker-row {
 }
 
 .force-desktop .patient-list-panel .list-page-head {
-  position: static;
-  height: auto;
-  padding: 0;
-  margin: 0 0 16px;
-  justify-content: space-between;
-  background: transparent;
-  border-bottom: 0;
-  box-shadow: none;
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
-  pointer-events: auto;
+  display: flex;
 }
 
-.force-desktop .patient-list-panel .list-page-head h1 {
-  padding: 0;
-  border: 0;
-  background: transparent;
-  box-shadow: none;
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
-  font-size: inherit;
-  line-height: inherit;
-}
-
-.force-desktop .patient-list-panel .list-page-head .add-patient-btn {
-  position: static;
-  right: auto;
-  transform: none;
+.force-desktop .app-main .page-head h1 {
+  display: block;
 }
 
 .force-desktop .patient-list-panel .agency-search-row {

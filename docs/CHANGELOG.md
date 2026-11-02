@@ -6,6 +6,30 @@ built and verified but not deployed.
 
 ## 2026-11-02
 
+- **Standard mobile header — Live 2026-11-02 (deploy-25:
+  dashboard bundle `index-uH1O1clT.js`, deployment
+  https://46719cf6.marcinnotech-app.pages.dev, verified —
+  Cloudflare API reports it as the canonical production
+  deployment and the deployment URL serves the new bundle;
+  deploy-20 token reused).** Jake's call: the docked bar is
+  now the standard header on EVERY mobile view, not just
+  Patients. The bar moved into the app shell (`mobile-topbar`):
+  fixed glass bar, menu + view circles on it, centered title
+  naming the current view (Dashboard / Patients / Calendar /
+  Expenses / Messages / Settings / Audit Log / …; on a patient
+  profile, the patient's name), and the Add Patient circle in
+  the bar on patient views. Per-view page-head titles are
+  hidden at phone widths (the bar is the title); app-main top
+  padding is 88px so content clears the bar; the Patients
+  page's own docked head (deploys 23–24) is retired — its head
+  hides on mobile and the shell bar replaces it; the floating
+  search and count note keep their clearances under the shared
+  bar. Forced-desktop view restores everything (bar off,
+  titles back, padding back). Deploy-24 (an hour earlier:
+  bundle `index-DCu59aeR.js`, deployment 4e6c5ac2) had shipped
+  only the + -as-a-circle step on the Patients bar and was
+  superseded by this deploy before its own changelog entry —
+  recorded here for completeness.
 - **Mobile Patients title as a docked BAR — Live 2026-11-02
   (deploy-23: dashboard bundle `index-FIx8xYCu.js`, deployment
   https://a68c0874.marcinnotech-app.pages.dev, verified —

@@ -1761,6 +1761,25 @@ export default function Dashboard({
   const patientActive =
     tab === "list" || tab === "profile" || tab === "add" || tab === "map";
 
+  // Mobile docked-bar title (standard mobile header, Jake,
+  // 2026-11-02): the shell bar names the current view; on the
+  // patient profile it names the patient.
+  const TAB_TITLES: Partial<Record<Tab, string>> = {
+    dashboard: "Dashboard",
+    list: "Patients",
+    add: "Add Patient",
+    map: "Patients Map",
+    appointment: "Calendar",
+    expenses: "Expenses",
+    audit: "Audit Log",
+    help: "Help Center",
+    categories: "Visit Categories",
+  };
+  const mobileTitle =
+    tab === "profile"
+      ? selectedPerson.name
+      : (TAB_TITLES[tab] ?? tab.charAt(0).toUpperCase() + tab.slice(1));
+
   return (
     <div className={forceDesktop ? "app-shell force-desktop" : "app-shell"}>
       <header className="app-header">
@@ -1843,6 +1862,28 @@ export default function Dashboard({
       >
         {forceDesktop ? <Smartphone size={21} /> : <Monitor size={21} />}
       </button>
+
+      {/* Mobile docked top bar — the standard mobile header
+          (Jake, 2026-11-02): one fixed glass bar on every view.
+          The menu and view circles render ON it (they carry the
+          higher z-index), the title is centered, and on patient
+          views the Add Patient circle rides in the bar. At phone
+          widths the per-view page-head titles are hidden
+          (styles.css) — this bar is the title now. */}
+      <div className="mobile-topbar">
+        <span className="mobile-topbar-title">{mobileTitle}</span>
+        {patientActive && tab !== "add" && (
+          <button
+            type="button"
+            className="mobile-topbar-add"
+            aria-label="Add Patient"
+            title="Add Patient"
+            onClick={() => setTab("add")}
+          >
+            <Plus size={20} />
+          </button>
+        )}
+      </div>
 
       {/* The DEMO DATA banner and the placeholder KPI/metrics
           row that used to sit between the header and the body
