@@ -1,99 +1,70 @@
-// Expenses view (2026-11-01, Jake's spec) — Record → Expenses.
+// Mileage view (2026-11-02, Jake's simplification) — a
+// per-day chain log plus generated expense reports. No
+// approval process: log the day's driving as a chain of legs,
+// generate a report for any month / date range, filtered by
+// agency.
 //
-// One expense report per clinician per period (usually a
-// month). During the month the owner adds mileage for drives
-// between patient homes plus non-mileage expense lines; the
-// home↔home-office commute is added as commute legs and
-// deducted per day by the API (reimbursable = driven −
-// commute, floored at zero). Drafts stay editable; the owner
-// submits for payment; a manager (never the report's owner)
-// approves / sends back / marks paid — role-gated on the API
-// since the manager PIN was retired on 2026-11-02. Previous
-// reports stay listed for viewing and printing.
-//
-// Mileage entry (Jake's form spec): each address is typed
-// with autocomplete OR filled from the phone's GPS with the
-// nearest patient home (a confirm-first suggestion — the
-// clinician sees whose home it picked and can retype). Road
-// miles come from routing (tollway vs no-tolls figures both
-// shown and stored); the "took the tollway" checkbox makes
-// the toll route's miles the leg's miles even when longer;
-// miles stay hand-correctable. Saving a leg chains the next
-// leg's start to this leg's end.
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+// The chain: Home -> Office bookends are fixed PERSONAL legs
+// (addresses from the clinician's staff profile and the
+// agency profile; their miles snapshot onto the day's legs,
+// so later address changes never rewrite history). Stops in
+// between are billable legs in visit order, ending back at
+// the office. Every leg's start and end can be set by tapping
+// a known place (Home / Office / a patient) or typing an
+// address with autocomplete. Routing defaults to the tollway
+// figure; a per-leg toggle marks back roads instead, and
+// miles stay hand-correctable after routing.
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { User } from "firebase/auth";
 import {
-  ArrowLeft,
+  Building2,
   Check,
-  LocateFixed,
+  Home,
+  MapPin,
+  Pencil,
   Plus,
   Printer,
-  Receipt,
-  Send,
   Trash2,
-  Undo2,
+  X,
 } from "lucide-react";
 import AddressAutocomplete, {
   type SuggestedAddress,
 } from "./AddressAutocomplete";
 import type { PersonUnderCare } from "../lib/demoData";
+import { fetchAgencies, type ApiAgency } from "../lib/patientApi";
+import { geocodeFreeText } from "../lib/geo";
 import {
-  addExpenseLine,
-  addMileageEntry,
-  approveExpenseReport,
-  createExpenseReport,
-  deleteExpenseLine,
-  deleteExpenseReport,
-  deleteMileageEntry,
-  getExpenseReport,
-  listExpenseReports,
-  payExpenseReport,
-  rejectExpenseReport,
-  reportLabel,
-  routeMileage,
-  submitExpenseReport,
-  type ExpenseReport,
-  type ReportDetail,
+  createMileage,
+  deleteMileage,
+  fetchMileage,
+  fetchMileageReport,
+  routeMiles,
+  updateMileage,
+  type MileageEntry,
+  type MileageReport,
 } from "../lib/expensesApi";
-import { isManagerRole, useMyStaff } from "../lib/useMyRole";
-import type { ApiRequestError } from "../lib/expensesApi";
+import { useMyStaff } from "../lib/useMyRole";
 
-const CATEGORIES: { value: string; label: string }[] = [
-  { value: "parking", label: "Parking" },
-  { value: "tolls", label: "Tolls" },
-  { value: "medical_supplies", label: "Medical supplies" },
-  { value: "office_supplies", label: "Office supplies" },
-  { value: "meals", label: "Meals" },
-  { value: "travel", label: "Travel" },
-  { value: "lodging", label: "Lodging" },
-  { value: "phone_internet", label: "Phone / internet" },
-  { value: "training", label: "Training" },
-  { value: "licenses", label: "Licenses" },
-  { value: "mileage", label: "Mileage (hand-entered)" },
-  { value: "other", label: "Other" },
-];
-
-function money(cents: number): string {
-  return (cents / 100).toLocaleString("en-US", {
-    style: "currency",
-    currency: "USD",
-  });
-}
+// ---------- small helpers ----------
 
 function todayStr(): string {
   const d = new Date();
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  const m = `${d.getMonth() + 1}`.padStart(2, "0");
+  const day = `${d.getDate()}`.padStart(2, "0");
+  return `${d.getFullYear()}-${m}-${day}`;
 }
 
-function monthPeriod(monthValue: string): { start: string; end: string } {
+function monthRange(monthValue: string): { from: string; to: string } {
   const [y, m] = monthValue.split("-").map(Number);
   const last = new Date(y, m, 0).getDate();
-  const p = (n: number) => String(n).padStart(2, "0");
   return {
-    start: `${y}-${p(m)}-01`,
-    end: `${y}-${p(m)}-${p(last)}`,
+    from: `${monthValue}-01`,
+    to: `${monthValue}-${`${last}`.padStart(2, "0")}`,
   };
+}
+
+function money(cents: number): string {
+  return `$${(cents / 100).toFixed(2)}`;
 }
 
 function prettyDate(iso: string): string {
@@ -104,46 +75,107 @@ function prettyDate(iso: string): string {
   });
 }
 
+function joinAddress(
+  street?: string | null,
+  city?: string | null,
+  state?: string | null,
+  zip?: string | null,
+): string {
+  const cityState = [city, state].filter(Boolean).join(", ");
+  return [street, cityState, zip].filter(Boolean).join(", ");
+}
+
+function suggestedToAddress(a: SuggestedAddress): string {
+  return joinAddress(a.street, a.city, a.state, a.postal_code);
+}
+
 function errText(err: unknown, fallback: string): string {
-  const e = err as ApiRequestError | null;
-  if (e?.code === "ROLE_REQUIRED" || e?.code === "NO_STAFF_RECORD") {
-    return "That action needs a manager or admin role.";
-  }
-  if (e?.code === "SELF_APPROVAL") {
-    return "You can't process your own report — another manager needs to do this one.";
-  }
-  if (e?.code === "REPORT_LOCKED") {
-    return "This report is no longer a draft, so it can't be changed.";
-  }
-  if (e?.code === "ROUTE_FAILED") {
-    return "Routing is unavailable right now — type the miles instead.";
-  }
+  if (err instanceof Error && err.message) return err.message;
   return fallback;
 }
 
-function haversineMi(
-  a: { lat: number; lng: number },
-  b: { lat: number; lng: number },
-): number {
-  const R = 3958.8;
-  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
-  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
-  const s =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos((a.lat * Math.PI) / 180) *
-      Math.cos((b.lat * Math.PI) / 180) *
-      Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(s));
-}
+const round2 = (n: number) => Math.round(n * 100) / 100;
 
-interface Endpoint {
-  text: string;
+// ---------- chain model ----------
+
+type StopKind = "home" | "office" | "patient" | "custom";
+
+interface Stop {
+  key: string;
+  kind: StopKind;
+  label: string;
+  address: string;
   lat: number | null;
   lng: number | null;
-  hint: string;
+  patient_id: string | null;
 }
 
-const blankEndpoint: Endpoint = { text: "", lat: null, lng: null, hint: "" };
+interface LegState {
+  miles_toll: number | null;
+  miles_no_toll: number | null;
+  used_tollway: boolean;
+  miles: string;
+  kind_override: "business" | "commute" | null;
+  saved_id: number | null;
+  routed_sig: string;
+  routing: boolean;
+  route_failed: boolean;
+}
+
+const blankLeg = (): LegState => ({
+  miles_toll: null,
+  miles_no_toll: null,
+  used_tollway: true,
+  miles: "",
+  kind_override: null,
+  saved_id: null,
+  routed_sig: "",
+  routing: false,
+  route_failed: false,
+});
+
+let stopSeq = 0;
+const nextKey = () => `stop-${(stopSeq += 1)}`;
+
+function legKind(
+  from: Stop,
+  to: Stop,
+  override: "business" | "commute" | null,
+): "business" | "commute" {
+  if (override) return override;
+  const bookend =
+    (from.kind === "home" && to.kind === "office") ||
+    (from.kind === "office" && to.kind === "home");
+  return bookend ? "commute" : "business";
+}
+
+function stopFromEndpoint(
+  label: string | null,
+  address: string | null,
+  lat: number | null,
+  lng: number | null,
+  patientId: string | null,
+  officeLabel: string,
+): Stop {
+  const kind: StopKind = patientId
+    ? "patient"
+    : label === "Home"
+      ? "home"
+      : label === officeLabel
+        ? "office"
+        : "custom";
+  return {
+    key: nextKey(),
+    kind,
+    label: label ?? "",
+    address: address ?? "",
+    lat,
+    lng,
+    patient_id: patientId,
+  };
+}
+
+// ---------- component ----------
 
 export default function ExpensesView({
   user,
@@ -154,860 +186,978 @@ export default function ExpensesView({
   user: User;
   people: PersonUnderCare[];
   apiConnected: boolean;
-  // Opened from the mobile Mileage pill (Jake, 2026-11-02): jump
-  // straight into the report covering the current month.
+  // Opened from the mobile Mileage pill: the day log defaults
+  // to today, which is exactly what this view opens on.
   autoOpenCurrent?: boolean;
 }) {
+  void autoOpenCurrent;
   const me = useMyStaff(user);
-  const isManager = isManagerRole(me);
-  const [reports, setReports] = useState<ExpenseReport[] | null>(null);
-  const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [detail, setDetail] = useState<ReportDetail | null>(null);
-  const [error, setError] = useState("");
+
+  const [agencies, setAgencies] = useState<ApiAgency[] | null>(null);
+  const [agencyId, setAgencyId] = useState<number | null>(null);
+  const [date, setDate] = useState(todayStr());
+  const [stops, setStops] = useState<Stop[]>([]);
+  const [legs, setLegs] = useState<LegState[]>([]);
+  const [loadedIds, setLoadedIds] = useState<number[]>([]);
+  const [dayLoaded, setDayLoaded] = useState(false);
+  const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [rate, setRate] = useState<string>(
+    () => localStorage.getItem("caretask-mileage-rate") ?? "0.70",
+  );
 
-  // New-report form.
-  const [month, setMonth] = useState(() => todayStr().slice(0, 7));
-  const [newTitle, setNewTitle] = useState("");
+  const [repMode, setRepMode] = useState<"month" | "range">("month");
+  const [repMonth, setRepMonth] = useState(() => todayStr().slice(0, 7));
+  const [repFrom, setRepFrom] = useState(() => monthRange(todayStr().slice(0, 7)).from);
+  const [repTo, setRepTo] = useState(() => monthRange(todayStr().slice(0, 7)).to);
+  const [repAgency, setRepAgency] = useState<number | null>(null);
+  const [report, setReport] = useState<MileageReport | null>(null);
+  const [repBusy, setRepBusy] = useState(false);
 
-  // Mileage form.
-  const [mDate, setMDate] = useState(todayStr());
-  const [mKind, setMKind] = useState<"business" | "commute">("business");
-  const [start, setStart] = useState<Endpoint>(blankEndpoint);
-  const [end, setEnd] = useState<Endpoint>(blankEndpoint);
-  const [milesToll, setMilesToll] = useState<number | null>(null);
-  const [milesNoToll, setMilesNoToll] = useState<number | null>(null);
-  const [usedTollway, setUsedTollway] = useState(false);
-  const [roundTrip, setRoundTrip] = useState(false);
-  const [miles, setMiles] = useState("");
-  const [milesTouched, setMilesTouched] = useState(false);
-  const [rate, setRate] = useState("");
-  const [routing, setRouting] = useState(false);
+  const officeCache = useRef(new Map<number, Stop>());
+  const homeCache = useRef<Stop | null>(null);
 
-  // Expense-line form.
-  const [xDate, setXDate] = useState(todayStr());
-  const [xCategory, setXCategory] = useState("parking");
-  const [xDesc, setXDesc] = useState("");
-  const [xAmount, setXAmount] = useState("");
+  const agency = agencies?.find((a) => a.id === agencyId) ?? null;
 
-  // Lifecycle.
-  const [confirmSubmit, setConfirmSubmit] = useState(false);
-  const [paymentRef, setPaymentRef] = useState("");
+  // ---------- endpoint resolution ----------
 
-  const loadReports = useCallback(async () => {
-    try {
-      setReports(await listExpenseReports(user));
-    } catch {
-      setReports([]);
-      setError("Couldn't load expense reports from the API.");
-    }
-  }, [user]);
+  const homeStop = useCallback(async (): Promise<Stop | null> => {
+    if (homeCache.current) return homeCache.current;
+    if (!me) return null;
+    const address = joinAddress(me.street, me.city, me.state, me.zip);
+    if (!address) return null;
+    const geo = await geocodeFreeText(address);
+    const stop: Stop = {
+      key: nextKey(),
+      kind: "home",
+      label: "Home",
+      address,
+      lat: geo?.lat ?? null,
+      lng: geo?.lon ?? null,
+      patient_id: null,
+    };
+    homeCache.current = stop;
+    return stop;
+  }, [me]);
 
-  const loadDetail = useCallback(
-    async (id: number) => {
-      try {
-        setDetail(await getExpenseReport(user, id));
-      } catch {
-        setError("Couldn't load that report.");
-      }
+  const officeStop = useCallback(
+    async (a: ApiAgency): Promise<Stop | null> => {
+      const cached = officeCache.current.get(a.id);
+      if (cached) return cached;
+      const address = joinAddress(a.street, a.city, a.state, a.postal_code);
+      if (!address) return null;
+      const geo = await geocodeFreeText(address);
+      const stop: Stop = {
+        key: nextKey(),
+        kind: "office",
+        label: a.display_name,
+        address,
+        lat: geo?.lat ?? null,
+        lng: geo?.lon ?? null,
+        patient_id: null,
+      };
+      officeCache.current.set(a.id, stop);
+      return stop;
     },
-    [user],
+    [],
   );
 
-  useEffect(() => {
-    if (apiConnected) void loadReports();
-  }, [apiConnected, loadReports]);
+  // ---------- day loading ----------
 
-  // Mileage-pill entry: once the list loads, open the report whose
-  // period covers today (else the newest listed). Once per mount.
-  const autoOpenedRef = useRef(false);
-  useEffect(() => {
-    if (!autoOpenCurrent || autoOpenedRef.current) return;
-    if (!reports || reports.length === 0 || selectedId !== null) return;
-    autoOpenedRef.current = true;
-    const today = todayStr();
-    const covering = reports.find(
-      (r) => r.period_start <= today && today <= r.period_end,
-    );
-    setSelectedId((covering ?? reports[0]).id);
-  }, [autoOpenCurrent, reports, selectedId]);
-
-  useEffect(() => {
-    if (selectedId !== null && apiConnected) void loadDetail(selectedId);
-    else setDetail(null);
-  }, [selectedId, apiConnected, loadDetail]);
-
-  const geocodedPeople = useMemo(
-    () =>
-      people.filter(
-        (p) =>
-          typeof p.latitude === "number" && typeof p.longitude === "number",
-      ),
-    [people],
+  const loadDay = useCallback(
+    async (forDate: string, forAgency: number | null, agencyList: ApiAgency[]) => {
+      setError("");
+      setNotice("");
+      setEditingKey(null);
+      const entries = await fetchMileage(user, {
+        from: forDate,
+        to: forDate,
+        agency_id: forAgency,
+      });
+      const ag = agencyList.find((a) => a.id === forAgency) ?? null;
+      const oLabel = ag?.display_name ?? "Office";
+      if (entries.length) {
+        const rebuilt: Stop[] = [
+          stopFromEndpoint(
+            entries[0].start_label,
+            entries[0].start_address,
+            entries[0].start_lat,
+            entries[0].start_lng,
+            null,
+            oLabel,
+          ),
+        ];
+        const rebuiltLegs: LegState[] = [];
+        for (const e of entries) {
+          rebuilt.push(
+            stopFromEndpoint(
+              e.end_label,
+              e.end_address,
+              e.end_lat,
+              e.end_lng,
+              e.patient_id,
+              oLabel,
+            ),
+          );
+          rebuiltLegs.push({
+            miles_toll: e.miles_toll,
+            miles_no_toll: e.miles_no_toll,
+            used_tollway: e.used_tollway,
+            miles: e.business_miles ? String(e.business_miles) : "",
+            kind_override:
+              (e.entry_kind === "commute" &&
+                !(
+                  (rebuilt[rebuilt.length - 2].kind === "home" &&
+                    rebuilt[rebuilt.length - 1].kind === "office") ||
+                  (rebuilt[rebuilt.length - 2].kind === "office" &&
+                    rebuilt[rebuilt.length - 1].kind === "home")
+                )) ||
+              (e.entry_kind === "business" &&
+                ((rebuilt[rebuilt.length - 2].kind === "home" &&
+                  rebuilt[rebuilt.length - 1].kind === "office") ||
+                  (rebuilt[rebuilt.length - 2].kind === "office" &&
+                    rebuilt[rebuilt.length - 1].kind === "home")))
+                ? e.entry_kind
+                : null,
+            saved_id: e.id,
+            routed_sig:
+              e.start_lat !== null && e.end_lat !== null
+                ? `${e.start_lat},${e.start_lng}->${e.end_lat},${e.end_lng}`
+                : "",
+            routing: false,
+            route_failed: false,
+          });
+        }
+        setStops(rebuilt);
+        setLegs(rebuiltLegs);
+        setLoadedIds(entries.map((e) => e.id));
+      } else {
+        // Fresh day: prefill the fixed bookends when both
+        // addresses are known.
+        const home = await homeStop();
+        const office = ag ? await officeStop(ag) : null;
+        if (home && office) {
+          setStops([
+            { ...home, key: nextKey() },
+            { ...office, key: nextKey() },
+            { ...home, key: nextKey() },
+          ]);
+          setLegs([blankLeg(), blankLeg()]);
+          setNotice("");
+        } else {
+          setStops([]);
+          setLegs([]);
+          if (!home) {
+            setNotice(
+              "Add your home address to your staff profile and the Home bookends will fill themselves in — you can still add stops by hand below.",
+            );
+          }
+        }
+        setLoadedIds([]);
+      }
+      setDirty(false);
+      setDayLoaded(true);
+    },
+    [user, homeStop, officeStop],
   );
+
+  // Initial data: agencies + patients, then the day.
+  useEffect(() => {
+    if (!apiConnected) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const ags = await fetchAgencies(user);
+        if (cancelled) return;
+        const active = ags.filter((a) => a.active);
+        setAgencies(active);
+        const primary = active.find((a) => a.is_primary) ?? active[0] ?? null;
+        const initialAgency = primary ? primary.id : null;
+        setAgencyId(initialAgency);
+        setRepAgency(initialAgency);
+        await loadDay(todayStr(), initialAgency, active);
+      } catch (err) {
+        if (!cancelled) setError(errText(err, "Could not load mileage data."));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apiConnected, user]);
+
+  const switchDay = async (nextDate: string, nextAgency: number | null) => {
+    if (dirty) {
+      setError("Save this day first — switching would drop unsaved changes.");
+      return;
+    }
+    setDate(nextDate);
+    setAgencyId(nextAgency);
+    setDayLoaded(false);
+    try {
+      await loadDay(nextDate, nextAgency, agencies ?? []);
+    } catch (err) {
+      setError(errText(err, "Could not load that day."));
+      setDayLoaded(true);
+    }
+  };
+
+  // ---------- routing ----------
+  // Route any leg whose endpoints both have coordinates and
+  // whose coordinate signature has not been routed yet.
+  useEffect(() => {
+    if (!dayLoaded) return;
+    legs.forEach((leg, i) => {
+      const from = stops[i];
+      const to = stops[i + 1];
+      if (!from || !to) return;
+      if (from.lat === null || from.lng === null || to.lat === null || to.lng === null) return;
+      const sig = `${from.lat},${from.lng}->${to.lat},${to.lng}`;
+      if (leg.routed_sig === sig || leg.routing) return;
+      setLegs((prev) =>
+        prev.map((l, j) => (j === i ? { ...l, routing: true, route_failed: false } : l)),
+      );
+      routeMiles(user, { lat: from.lat, lng: from.lng }, { lat: to.lat, lng: to.lng })
+        .then(({ miles_toll, miles_no_toll }) => {
+          setLegs((prev) =>
+            prev.map((l, j) => {
+              if (j !== i) return l;
+              const used = l.used_tollway
+                ? (miles_toll ?? miles_no_toll)
+                : (miles_no_toll ?? miles_toll);
+              return {
+                ...l,
+                miles_toll,
+                miles_no_toll,
+                miles: used !== null ? String(used) : l.miles,
+                routed_sig: sig,
+                routing: false,
+              };
+            }),
+          );
+          setDirty(true);
+        })
+        .catch(() => {
+          setLegs((prev) =>
+            prev.map((l, j) =>
+              j === i ? { ...l, routed_sig: sig, routing: false, route_failed: true } : l,
+            ),
+          );
+        });
+    });
+  }, [stops, legs, dayLoaded, user]);
+
+  // ---------- chain editing ----------
+
+  const updateStop = (key: string, stop: Stop) => {
+    setStops((prev) => prev.map((s) => (s.key === key ? { ...stop, key } : s)));
+    setDirty(true);
+    setEditingKey(null);
+  };
+
+  const addStop = () => {
+    const blank: Stop = {
+      key: nextKey(),
+      kind: "custom",
+      label: "",
+      address: "",
+      lat: null,
+      lng: null,
+      patient_id: null,
+    };
+    // Keep the bookend template [home, office, ...stops...,
+    // office, home]: a bare [home, office, home] day splits
+    // its single office into start + return stops for the
+    // first middle stop; later stops insert before the
+    // closing office. Non-template chains just append.
+    let next: Stop[];
+    const lastStop = stops[stops.length - 1];
+    const secondLast = stops[stops.length - 2];
+    if (
+      stops.length === 3 &&
+      stops[0].kind === "home" &&
+      secondLast?.kind === "office" &&
+      lastStop?.kind === "home"
+    ) {
+      const officeCopy: Stop = { ...secondLast, key: nextKey() };
+      next = [stops[0], secondLast, blank, officeCopy, lastStop];
+    } else if (
+      stops.length > 3 &&
+      secondLast?.kind === "office" &&
+      lastStop?.kind === "home"
+    ) {
+      next = [...stops.slice(0, stops.length - 2), blank, secondLast, lastStop];
+    } else {
+      next = [...stops, blank];
+    }
+    setLegs((prev) => {
+      const target = Math.max(0, next.length - 1);
+      if (prev.length >= target) return prev;
+      return [...prev, ...Array.from({ length: target - prev.length }, blankLeg)];
+    });
+    setStops(next);
+    setDirty(true);
+    setEditingKey(blank.key);
+  };
+
+  const removeStop = (key: string) => {
+    const idx = stops.findIndex((s) => s.key === key);
+    if (idx < 0) return;
+    setStops((prev) => prev.filter((s) => s.key !== key));
+    setLegs((prev) => {
+      // Removing a stop merges its two adjacent legs into the
+      // previous one; the merged leg re-routes from its new
+      // endpoints. Removing an end stop drops its only leg.
+      if (idx === 0) return prev.slice(1);
+      if (idx === stops.length - 1) return prev.slice(0, -1);
+      const next = [...prev];
+      next.splice(idx, 1);
+      next[idx - 1] = { ...next[idx - 1], routed_sig: "", miles_toll: null, miles_no_toll: null };
+      return next;
+    });
+    setDirty(true);
+  };
+
+  const updateLeg = (i: number, patch: Partial<LegState>) => {
+    setLegs((prev) => prev.map((l, j) => (j === i ? { ...l, ...patch } : l)));
+    setDirty(true);
+  };
+
+  const toggleTollway = (i: number, tollway: boolean) => {
+    const leg = legs[i];
+    const used = tollway
+      ? (leg.miles_toll ?? leg.miles_no_toll)
+      : (leg.miles_no_toll ?? leg.miles_toll);
+    updateLeg(i, {
+      used_tollway: tollway,
+      miles: used !== null ? String(used) : leg.miles,
+    });
+  };
+
+  // ---------- save ----------
+
+  const saveDay = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      const rateNum = Number(rate);
+      const savedIds: number[] = [];
+      for (let i = 0; i < legs.length; i += 1) {
+        const leg = legs[i];
+        const from = stops[i];
+        const to = stops[i + 1];
+        const kind = legKind(from, to, leg.kind_override);
+        const input = {
+          entry_date: date,
+          seq: i,
+          entry_kind: kind,
+          start_label: from.label || null,
+          start_address: from.address || null,
+          end_label: to.label || null,
+          end_address: to.address || null,
+          start_lat: from.lat,
+          start_lng: from.lng,
+          end_lat: to.lat,
+          end_lng: to.lng,
+          patient_id: to.patient_id,
+          agency_id: agencyId,
+          miles_toll: leg.miles_toll,
+          miles_no_toll: leg.miles_no_toll,
+          used_tollway: leg.used_tollway,
+          business_miles: Number(leg.miles) || 0,
+          rate_per_mile: kind === "business" && rateNum > 0 ? rateNum : null,
+        };
+        const saved: MileageEntry = leg.saved_id
+          ? await updateMileage(user, leg.saved_id, input)
+          : await createMileage(user, input);
+        savedIds.push(saved.id);
+      }
+      for (const id of loadedIds) {
+        if (!savedIds.includes(id)) await deleteMileage(user, id);
+      }
+      localStorage.setItem("caretask-mileage-rate", rate);
+      await loadDay(date, agencyId, agencies ?? []);
+      setNotice("Day saved.");
+    } catch (err) {
+      setError(errText(err, "Could not save the day log."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // ---------- report ----------
+
+  const generateReport = async () => {
+    setRepBusy(true);
+    setError("");
+    try {
+      const range = repMode === "month" ? monthRange(repMonth) : { from: repFrom, to: repTo };
+      const rep = await fetchMileageReport(user, {
+        ...range,
+        agency_id: repAgency,
+      });
+      setReport(rep);
+    } catch (err) {
+      setError(errText(err, "Could not generate the report."));
+    } finally {
+      setRepBusy(false);
+    }
+  };
+
+  // ---------- render ----------
 
   if (!apiConnected) {
     return (
       <section>
-        <h1>Expenses</h1>
+        <div className="page-head">
+          <h1>Mileage</h1>
+        </div>
         <p className="exp-notice">
-          Expense reports are stored in the CareTask database — they can't
-          load while the API is unreachable.
+          The mileage log is stored in the CareTask database — it can't load
+          while the API is unreachable.
         </p>
       </section>
     );
   }
 
-  const report = detail?.report ?? null;
-  const isDraft = report?.status === "draft";
+  const rateNum = Number(rate) || 0;
+  let billable = 0;
+  let personal = 0;
+  legs.forEach((leg, i) => {
+    const kind = legKind(stops[i], stops[i + 1], leg.kind_override);
+    const mi = Number(leg.miles) || 0;
+    if (kind === "commute") personal += mi;
+    else billable += mi;
+  });
 
-  // The final miles for the leg being entered, from the chosen
-  // route figure — unless the clinician typed miles by hand.
-  function applyRouteMiles(
-    toll: number | null,
-    noToll: number | null,
-    tollway: boolean,
-    rt: boolean,
-  ) {
-    if (milesTouched) return;
-    const base = tollway && toll !== null ? toll : (noToll ?? toll);
-    if (base !== null) setMiles(String(Math.round(base * (rt ? 2 : 1) * 100) / 100));
-  }
-
-  async function handleRoute() {
-    if (start.lat === null || start.lng === null || end.lat === null || end.lng === null) {
-      setError("Both addresses need a map location first — pick a suggestion or use the GPS button.");
-      return;
-    }
-    setRouting(true);
-    setError("");
-    try {
-      const r = await routeMileage(user, {
-        start_lat: start.lat,
-        start_lng: start.lng,
-        end_lat: end.lat,
-        end_lng: end.lng,
-      });
-      setMilesToll(r.miles_toll);
-      setMilesNoToll(r.miles_no_toll);
-      setMilesTouched(false);
-      applyRouteMiles(r.miles_toll, r.miles_no_toll, usedTollway, roundTrip);
-    } catch (err) {
-      setError(errText(err, "Couldn't calculate road miles."));
-    } finally {
-      setRouting(false);
-    }
-  }
-
-  function fillFromGps(which: "start" | "end") {
-    const setter = which === "start" ? setStart : setEnd;
-    if (!("geolocation" in navigator)) {
-      setter((e) => ({ ...e, hint: "This device has no GPS location available." }));
-      return;
-    }
-    setter((e) => ({ ...e, hint: "Finding your location…" }));
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const here = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-        let best: { person: PersonUnderCare; dist: number } | null = null;
-        for (const p of geocodedPeople) {
-          const dist = haversineMi(here, {
-            lat: p.latitude as number,
-            lng: p.longitude as number,
-          });
-          if (!best || dist < best.dist) best = { person: p, dist };
-        }
-        if (best && best.dist <= 25) {
-          const p = best.person;
-          const addr = [p.street, p.city, p.state, p.postalCode]
-            .filter(Boolean)
-            .join(", ");
-          setter({
-            text: addr || p.name,
-            lat: p.latitude as number,
-            lng: p.longitude as number,
-            hint: `Nearest patient home: ${p.name} (~${best.dist.toFixed(1)} mi away). Check it's the right home — you can retype the address.`,
-          });
-        } else {
-          setter({
-            text: "",
-            lat: here.lat,
-            lng: here.lng,
-            hint: "No patient home near your current location — type the address; your GPS position is saved for routing.",
-          });
-        }
-      },
-      () => setter((e) => ({ ...e, hint: "Couldn't get your location. Type the address instead." })),
-      { enableHighAccuracy: true, timeout: 10000 },
-    );
-  }
-
-  function endpointFromSuggested(s: SuggestedAddress): Endpoint {
-    const text = [s.street, s.city, s.state, s.postal_code]
-      .filter(Boolean)
-      .join(", ");
-    return { text, lat: s.latitude, lng: s.longitude, hint: "" };
-  }
-
-  async function handleAddMileage(e: React.FormEvent) {
-    e.preventDefault();
-    if (!report) return;
-    const milesNum = Number(miles);
-    if (!miles || Number.isNaN(milesNum) || milesNum < 0) {
-      setError("Enter the trip miles (calculate them or type them).");
-      return;
-    }
-    setBusy(true);
-    setError("");
-    try {
-      await addMileageEntry(user, report.id, {
-        entry_date: mDate,
-        entry_kind: mKind,
-        start_address: start.text || null,
-        end_address: end.text || null,
-        start_lat: start.lat,
-        start_lng: start.lng,
-        end_lat: end.lat,
-        end_lng: end.lng,
-        miles_toll: milesToll,
-        miles_no_toll: milesNoToll,
-        used_tollway: usedTollway,
-        round_trip: roundTrip,
-        business_miles: milesNum,
-        rate_per_mile: rate ? Number(rate) : null,
-      });
-      // Chain: the next leg starts where this one ended.
-      setStart(end);
-      setEnd(blankEndpoint);
-      setMilesToll(null);
-      setMilesNoToll(null);
-      setMiles("");
-      setMilesTouched(false);
-      setUsedTollway(false);
-      setRoundTrip(false);
-      await loadDetail(report.id);
-    } catch (err) {
-      setError(errText(err, "Couldn't save that mileage entry."));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function handleAddExpense(e: React.FormEvent) {
-    e.preventDefault();
-    if (!report) return;
-    const dollars = Number(xAmount);
-    if (!xAmount || Number.isNaN(dollars) || dollars < 0) {
-      setError("Enter the expense amount.");
-      return;
-    }
-    setBusy(true);
-    setError("");
-    try {
-      await addExpenseLine(user, report.id, {
-        expense_date: xDate,
-        category: xCategory,
-        description: xDesc || null,
-        amount_cents: Math.round(dollars * 100),
-      });
-      setXDesc("");
-      setXAmount("");
-      await loadDetail(report.id);
-    } catch (err) {
-      setError(errText(err, "Couldn't save that expense."));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function handleCreateReport(e: React.FormEvent) {
-    e.preventDefault();
-    const { start: s, end: en } = monthPeriod(month);
-    setBusy(true);
-    setError("");
-    try {
-      const created = await createExpenseReport(user, {
-        period_start: s,
-        period_end: en,
-        title: newTitle.trim() || undefined,
-      });
-      setNewTitle("");
-      await loadReports();
-      setSelectedId(created.id);
-    } catch (err) {
-      setError(errText(err, "Couldn't create the report."));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function lifecycle(action: "submit" | "approve" | "reject" | "pay") {
-    if (!report) return;
-    setBusy(true);
-    setError("");
-    try {
-      if (action === "submit") await submitExpenseReport(user, report.id);
-      if (action === "approve") await approveExpenseReport(user, report.id);
-      if (action === "reject") await rejectExpenseReport(user, report.id);
-      if (action === "pay") await payExpenseReport(user, report.id, paymentRef);
-      setConfirmSubmit(false);
-      setPaymentRef("");
-      await Promise.all([loadReports(), loadDetail(report.id)]);
-    } catch (err) {
-      setError(errText(err, "That action didn't go through."));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  function handlePrint() {
-    if (!detail || !report) return;
-    const rows = detail.days
-      .map(
-        (d) => `
-        <h3>${prettyDate(d.date)}</h3>
-        <table>${d.entries
-          .map(
-            (en) => `<tr><td>${en.entry_kind === "commute" ? "Commute" : "Drive"}</td><td>${en.start_address ?? ""} → ${en.end_address ?? ""}</td><td class="n">${en.business_miles} mi${en.used_tollway ? " (tollway)" : ""}${en.round_trip ? " (round trip)" : ""}</td></tr>`,
-          )
-          .join("")}
-        <tr class="tot"><td colspan="2">Driven ${d.driven_miles} − Commute ${d.commute_miles} = Reimbursable</td><td class="n">${d.reimbursable_miles} mi</td></tr></table>`,
-      )
-      .join("");
-    const lines = detail.expenses.length
-      ? `<h3>Other expenses</h3><table>${detail.expenses
-          .map(
-            (x) => `<tr><td>${prettyDate(x.expense_date)}</td><td>${x.category.replace(/_/g, " ")}</td><td>${x.description ?? ""}</td><td class="n">${money(x.amount_cents)}</td></tr>`,
-          )
-          .join("")}</table>`
-      : "";
-    const html = `<!DOCTYPE html><html><head><title>${reportLabel(report)}</title>
-      <style>body{font-family:system-ui,sans-serif;margin:32px;color:#14232b}table{width:100%;border-collapse:collapse;margin:6px 0 14px}td{border-bottom:1px solid #ddd;padding:5px 8px;font-size:13px}.n{text-align:right;white-space:nowrap}.tot td{font-weight:600;border-top:2px solid #999}h3{margin:16px 0 4px}</style></head>
-      <body><h2>${reportLabel(report)}</h2>
-      <p>${report.owner_name ?? ""} · ${report.period_start} to ${report.period_end} · Status: ${report.status}</p>
-      ${rows}${lines}
-      <p><strong>Total reimbursable miles:</strong> ${detail.total_reimbursable_miles} mi<br>
-      <strong>Mileage:</strong> ${money(detail.mileage_amount_cents)} · <strong>Other expenses:</strong> ${money(detail.expenses_amount_cents)} · <strong>Total:</strong> ${money(detail.total_amount_cents)}</p>
-      </body></html>`;
-    const w = window.open("", "_blank");
-    if (w) {
-      w.document.write(html);
-      w.document.close();
-      w.focus();
-      w.print();
-    }
-  }
-
-  // ---------- list view ----------
-  if (selectedId === null) {
-    return (
-      <section>
-        <div className="page-head">
-          <h1>Expenses</h1>
-        </div>
-        {error && <p className="exp-error">{error}</p>}
-        <form className="exp-new" onSubmit={handleCreateReport}>
-          <label>
-            Month
-            <input
-              type="month"
-              value={month}
-              onChange={(e) => setMonth(e.target.value)}
-              required
-            />
-          </label>
-          <label className="exp-grow">
-            Name (optional)
-            <input
-              type="text"
-              value={newTitle}
-              onChange={(e) => setNewTitle(e.target.value)}
-              placeholder="October mileage – CenterWell"
-            />
-          </label>
-          <button className="btn btn-primary" type="submit" disabled={busy}>
-            <Plus size={16} /> New report
-          </button>
-        </form>
-        {reports === null ? (
-          <p>Loading…</p>
-        ) : reports.length === 0 ? (
-          <p className="exp-notice">
-            No expense reports yet. Create one for this month and add mileage
-            as you drive.
-          </p>
-        ) : (
-          <div className="exp-list">
-            {reports.map((r) => (
-              <button
-                key={r.id}
-                type="button"
-                className="exp-row"
-                onClick={() => setSelectedId(r.id)}
-              >
-                <span className="exp-row-main">
-                  <strong>{reportLabel(r)}</strong>
-                  <span className="exp-row-sub">
-                    {r.period_start} → {r.period_end}
-                    {r.owner_name ? ` · ${r.owner_name}` : ""}
-                  </span>
-                </span>
-                <span className={`exp-status exp-status-${r.status}`}>
-                  {r.status}
-                </span>
-              </button>
-            ))}
-          </div>
-        )}
-      </section>
-    );
-  }
-
-  // ---------- detail view ----------
   return (
     <section>
-      <button
-        type="button"
-        className="btn btn-ghost exp-back"
-        onClick={() => {
-          setSelectedId(null);
-          setDetail(null);
-          setError("");
-        }}
-      >
-        <ArrowLeft size={16} /> Expense reports
-      </button>
-      {!detail || !report ? (
-        <p>Loading…</p>
-      ) : (
-        <>
-          <div className="page-head">
-            <h1>{reportLabel(report)}</h1>
-            <span className={`exp-status exp-status-${report.status}`}>
-              {report.status}
-            </span>
-          </div>
-          <p className="exp-sub">
-            {report.period_start} → {report.period_end}
-            {report.owner_name ? ` · ${report.owner_name}` : ""}
-            {report.payment_ref ? ` · Payment ref ${report.payment_ref}` : ""}
+      <div className="page-head">
+        <h1>Mileage</h1>
+        <p className="page-sub">
+          Log the day's drive as a chain — home and office bookends are
+          personal; the stops between them are billable.
+        </p>
+      </div>
+
+      {error && <p className="exp-error">{error}</p>}
+      {notice && <p className="exp-notice">{notice}</p>}
+
+      <div className="mlg-controls card">
+        <label>
+          Date
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => void switchDay(e.target.value, agencyId)}
+          />
+        </label>
+        <label>
+          Agency
+          <select
+            value={agencyId ?? ""}
+            onChange={(e) =>
+              void switchDay(date, e.target.value ? Number(e.target.value) : null)
+            }
+          >
+            {(agencies ?? []).map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.display_name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Rate ($/mi)
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            value={rate}
+            onChange={(e) => {
+              setRate(e.target.value);
+              setDirty(true);
+            }}
+          />
+        </label>
+        <button
+          type="button"
+          className="btn btn-primary"
+          onClick={() => void saveDay()}
+          disabled={busy || !dayLoaded}
+        >
+          <Check size={16} /> {busy ? "Saving…" : "Save day log"}
+        </button>
+      </div>
+
+      <div className="card mlg-chain">
+        {!dayLoaded && <p className="mlg-empty">Loading the day…</p>}
+        {dayLoaded && stops.length === 0 && (
+          <p className="mlg-empty">
+            No stops yet. Add your first stop below — pick a patient, tap
+            Home or Office, or type any address.
           </p>
-          {error && <p className="exp-error">{error}</p>}
-
-          <div className="stat-grid">
-            <div className="stat-card">
-              <Receipt size={20} className="stat-icon" />
-              <p className="stat-value">{detail.total_reimbursable_miles} mi</p>
-              <p className="stat-label">Reimbursable miles</p>
-            </div>
-            <div className="stat-card">
-              <p className="stat-value">{money(detail.mileage_amount_cents)}</p>
-              <p className="stat-label">Mileage</p>
-            </div>
-            <div className="stat-card">
-              <p className="stat-value">{money(detail.expenses_amount_cents)}</p>
-              <p className="stat-label">Other expenses</p>
-            </div>
-            <div className="stat-card">
-              <p className="stat-value">{money(detail.total_amount_cents)}</p>
-              <p className="stat-label">Report total</p>
-            </div>
-          </div>
-
-          {detail.days.length === 0 && detail.expenses.length === 0 && (
-            <p className="exp-notice">
-              Nothing in this report yet — add your first drive below.
-            </p>
-          )}
-
-          {detail.days.map((d) => (
-            <article key={d.date} className="exp-day">
-              <h3>{prettyDate(d.date)}</h3>
-              {d.entries.map((en) => (
-                <div key={en.id} className="exp-entry">
-                  <span
-                    className={
-                      en.entry_kind === "commute"
-                        ? "exp-kind exp-kind-commute"
-                        : "exp-kind"
-                    }
-                  >
-                    {en.entry_kind === "commute" ? "Commute" : "Drive"}
-                  </span>
-                  <span className="exp-entry-route">
-                    {en.start_address || "—"} → {en.end_address || "—"}
-                    {en.used_tollway && (
-                      <span className="exp-badge">tollway</span>
-                    )}
-                    {en.round_trip && (
-                      <span className="exp-badge">round trip</span>
-                    )}
-                  </span>
-                  <span className="exp-entry-miles">
-                    {en.business_miles} mi
-                    {en.rate_per_mile !== null &&
-                      ` @ $${en.rate_per_mile}`}
-                  </span>
-                  {isDraft && (
-                    <button
-                      type="button"
-                      className="btn btn-ghost exp-del"
-                      title="Remove entry"
-                      onClick={async () => {
-                        await deleteMileageEntry(user, report.id, en.id);
-                        await loadDetail(report.id);
-                      }}
-                    >
-                      <Trash2 size={15} />
-                    </button>
-                  )}
-                </div>
-              ))}
-              <p className="exp-day-total">
-                Driven {d.driven_miles} − commute {d.commute_miles} ={" "}
-                <strong>{d.reimbursable_miles} mi reimbursable</strong>
-              </p>
-            </article>
-          ))}
-
-          {detail.expenses.length > 0 && (
-            <article className="exp-day">
-              <h3>Other expenses</h3>
-              {detail.expenses.map((x) => (
-                <div key={x.id} className="exp-entry">
-                  <span className="exp-kind">
-                    {CATEGORIES.find((c) => c.value === x.category)?.label ??
-                      x.category}
-                  </span>
-                  <span className="exp-entry-route">
-                    {prettyDate(x.expense_date)}
-                    {x.description ? ` · ${x.description}` : ""}
-                  </span>
-                  <span className="exp-entry-miles">{money(x.amount_cents)}</span>
-                  {isDraft && (
-                    <button
-                      type="button"
-                      className="btn btn-ghost exp-del"
-                      title="Remove expense"
-                      onClick={async () => {
-                        await deleteExpenseLine(user, report.id, x.id);
-                        await loadDetail(report.id);
-                      }}
-                    >
-                      <Trash2 size={15} />
-                    </button>
-                  )}
-                </div>
-              ))}
-            </article>
-          )}
-
-          {isDraft && (
-            <>
-              <form className="exp-form" onSubmit={handleAddMileage}>
-                <h3>Add mileage</h3>
-                <div className="exp-form-grid">
-                  <label>
-                    Date
-                    <input
-                      type="date"
-                      value={mDate}
-                      onChange={(e) => setMDate(e.target.value)}
-                      required
-                    />
-                  </label>
-                  <label>
-                    Type
-                    <select
-                      value={mKind}
-                      onChange={(e) =>
-                        setMKind(e.target.value as "business" | "commute")
-                      }
-                    >
-                      <option value="business">Drive between homes</option>
-                      <option value="commute">
-                        Commute (home ↔ home office)
-                      </option>
-                    </select>
-                  </label>
-                </div>
-                {(["start", "end"] as const).map((which) => {
-                  const ep = which === "start" ? start : end;
-                  const setter = which === "start" ? setStart : setEnd;
-                  return (
-                    <div key={which} className="exp-addr">
-                      <div className="exp-addr-field">
-                        <span className="exp-addr-label">
-                          {which === "start" ? "From" : "To"}
-                        </span>
-                        <AddressAutocomplete
-                          value={ep.text}
-                          onChange={(v) =>
-                            setter({ text: v, lat: null, lng: null, hint: "" })
-                          }
-                          onSelectAddress={(s) =>
-                            setter(endpointFromSuggested(s))
-                          }
-                        />
-                      </div>
-                      <button
-                        type="button"
-                        className="btn btn-secondary"
-                        onClick={() => fillFromGps(which)}
-                        title="Use the nearest patient home from my location"
-                      >
-                        <LocateFixed size={15} /> Nearest home
-                      </button>
-                      {ep.hint && <p className="exp-hint">{ep.hint}</p>}
-                    </div>
-                  );
-                })}
-                <div className="exp-form-grid">
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={handleRoute}
-                    disabled={routing}
-                  >
-                    {routing ? "Calculating…" : "Calculate road miles"}
-                  </button>
-                  <span className="exp-routes">
-                    {milesToll !== null && `Tollway route: ${milesToll} mi`}
-                    {milesToll !== null && milesNoToll !== null && " · "}
-                    {milesNoToll !== null && `No tolls: ${milesNoToll} mi`}
-                    {milesToll === null && milesNoToll === null &&
-                      "Pick both addresses, then calculate — or type the miles."}
-                  </span>
-                </div>
-                <div className="exp-form-grid">
-                  <label className="exp-check">
-                    <input
-                      type="checkbox"
-                      checked={usedTollway}
-                      onChange={(e) => {
-                        setUsedTollway(e.target.checked);
-                        applyRouteMiles(
-                          milesToll,
-                          milesNoToll,
-                          e.target.checked,
-                          roundTrip,
-                        );
-                      }}
-                    />
-                    I took the tollway
-                  </label>
-                  <label className="exp-check">
-                    <input
-                      type="checkbox"
-                      checked={roundTrip}
-                      onChange={(e) => {
-                        setRoundTrip(e.target.checked);
-                        applyRouteMiles(
-                          milesToll,
-                          milesNoToll,
-                          usedTollway,
-                          e.target.checked,
-                        );
-                      }}
-                    />
-                    Round trip
-                  </label>
-                  <label>
-                    Miles
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={miles}
-                      onChange={(e) => {
-                        setMiles(e.target.value);
-                        setMilesTouched(true);
-                      }}
-                      required
-                    />
-                  </label>
-                  <label>
-                    Rate $/mi (optional)
-                    <input
-                      type="number"
-                      step="0.001"
-                      min="0"
-                      value={rate}
-                      onChange={(e) => setRate(e.target.value)}
-                      placeholder="0.70"
-                    />
-                  </label>
-                </div>
-                <button className="btn btn-primary" type="submit" disabled={busy}>
-                  <Plus size={16} /> Add drive
-                </button>
-              </form>
-
-              <form className="exp-form" onSubmit={handleAddExpense}>
-                <h3>Add an expense</h3>
-                <div className="exp-form-grid">
-                  <label>
-                    Date
-                    <input
-                      type="date"
-                      value={xDate}
-                      onChange={(e) => setXDate(e.target.value)}
-                      required
-                    />
-                  </label>
-                  <label>
-                    Category
-                    <select
-                      value={xCategory}
-                      onChange={(e) => setXCategory(e.target.value)}
-                    >
-                      {CATEGORIES.map((c) => (
-                        <option key={c.value} value={c.value}>
-                          {c.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="exp-grow">
-                    Description
-                    <input
-                      type="text"
-                      value={xDesc}
-                      onChange={(e) => setXDesc(e.target.value)}
-                      placeholder="Parking at the hospital"
-                    />
-                  </label>
-                  <label>
-                    Amount $
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={xAmount}
-                      onChange={(e) => setXAmount(e.target.value)}
-                      required
-                    />
-                  </label>
-                </div>
-                <button className="btn btn-primary" type="submit" disabled={busy}>
-                  <Plus size={16} /> Add expense
-                </button>
-              </form>
-            </>
-          )}
-
-          <div className="exp-actions">
-            <button type="button" className="btn btn-secondary" onClick={handlePrint}>
-              <Printer size={16} /> Print report
-            </button>
-            {isDraft &&
-              (confirmSubmit ? (
-                <>
-                  <span>Submit this report for payment?</span>
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    disabled={busy}
-                    onClick={() => lifecycle("submit")}
-                  >
-                    <Check size={16} /> Yes, submit
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-ghost"
-                    onClick={() => setConfirmSubmit(false)}
-                  >
-                    Keep editing
-                  </button>
-                </>
-              ) : (
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  onClick={() => setConfirmSubmit(true)}
-                >
-                  <Send size={16} /> Submit for payment
-                </button>
-              ))}
-            {isDraft && (
-              <button
-                type="button"
-                className="btn btn-danger"
-                disabled={busy}
-                onClick={async () => {
-                  await deleteExpenseReport(user, report.id);
-                  setSelectedId(null);
-                  await loadReports();
-                }}
-              >
-                <Trash2 size={16} /> Delete report
-              </button>
+        )}
+        {stops.map((stop, i) => (
+          <div key={stop.key}>
+            <StopRow
+              stop={stop}
+              patients={people}
+              homeStop={homeStop}
+              officeStop={agency ? () => officeStop(agency) : null}
+              editing={editingKey === stop.key}
+              onEdit={() => setEditingKey(stop.key)}
+              onDone={(s) => updateStop(stop.key, s)}
+              onCancel={() => setEditingKey(null)}
+              onRemove={() => removeStop(stop.key)}
+            />
+            {i < legs.length && (
+              <LegRow
+                leg={legs[i]}
+                kind={legKind(stop, stops[i + 1], legs[i].kind_override)}
+                onToggle={(t) => toggleTollway(i, t)}
+                onMiles={(v) => updateLeg(i, { miles: v })}
+                onKind={(k) => updateLeg(i, { kind_override: k })}
+              />
             )}
           </div>
+        ))}
+        <div className="mlg-addstop">
+          <button type="button" className="btn" onClick={addStop}>
+            <Plus size={16} /> Add a stop
+          </button>
+          <span className="mlg-hint">
+            Pick a patient, tap Home/Office, or type any address — each new
+            stop chains from the one before it.
+          </span>
+        </div>
+      </div>
 
-          {(report.status === "submitted" || report.status === "approved") &&
-            (isManager && me && Number(me.id) !== report.user_id ? (
-              <div className="exp-manager">
-                <h3>Manager review</h3>
-                {report.status === "approved" && (
-                  <div className="exp-form-grid">
-                    <label className="exp-grow">
-                      Payment reference (optional)
-                      <input
-                        type="text"
-                        value={paymentRef}
-                        onChange={(e) => setPaymentRef(e.target.value)}
-                        placeholder="ACH-1001"
-                      />
-                    </label>
+      <div className="mlg-totals">
+        <div className="mlg-total mlg-total-hero">
+          <span>Billable</span>
+          <strong>{round2(billable)} mi</strong>
+        </div>
+        <div className="mlg-total">
+          <span>Personal (fixed)</span>
+          <strong>{round2(personal)} mi</strong>
+        </div>
+        <div className="mlg-total">
+          <span>Driven</span>
+          <strong>{round2(billable + personal)} mi</strong>
+        </div>
+        <div className="mlg-total">
+          <span>Reimbursement</span>
+          <strong>{money(Math.round(billable * rateNum * 100))}</strong>
+        </div>
+      </div>
+
+      <div className="card mlg-report">
+        <h2>Expense report</h2>
+        <div className="mlg-controls">
+          <label>
+            Period
+            <select
+              value={repMode}
+              onChange={(e) => setRepMode(e.target.value as "month" | "range")}
+            >
+              <option value="month">Month</option>
+              <option value="range">Date range</option>
+            </select>
+          </label>
+          {repMode === "month" ? (
+            <label>
+              Month
+              <input
+                type="month"
+                value={repMonth}
+                onChange={(e) => setRepMonth(e.target.value)}
+              />
+            </label>
+          ) : (
+            <>
+              <label>
+                From
+                <input
+                  type="date"
+                  value={repFrom}
+                  onChange={(e) => setRepFrom(e.target.value)}
+                />
+              </label>
+              <label>
+                To
+                <input
+                  type="date"
+                  value={repTo}
+                  onChange={(e) => setRepTo(e.target.value)}
+                />
+              </label>
+            </>
+          )}
+          <label>
+            Agency
+            <select
+              value={repAgency ?? ""}
+              onChange={(e) =>
+                setRepAgency(e.target.value ? Number(e.target.value) : null)
+              }
+            >
+              <option value="">All agencies</option>
+              {(agencies ?? []).map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.display_name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => void generateReport()}
+            disabled={repBusy}
+          >
+            {repBusy ? "Generating…" : "Generate"}
+          </button>
+          {report && (
+            <button type="button" className="btn" onClick={() => window.print()}>
+              <Printer size={16} /> Print / PDF
+            </button>
+          )}
+        </div>
+
+        {report && (
+          <div className="mlg-print">
+            <h3>
+              Mileage report — {prettyDate(report.from)} to {prettyDate(report.to)}
+              {report.clinician_name ? ` · ${report.clinician_name}` : ""}
+            </h3>
+            {report.days.length === 0 && (
+              <p className="mlg-empty">No mileage logged in this period.</p>
+            )}
+            {report.days.map((d) => (
+              <div key={d.date} className="mlg-day">
+                <div className="mlg-day-head">
+                  <strong>{prettyDate(d.date)}</strong>
+                  <span>
+                    Billable {d.billable_miles} mi · Personal {d.personal_miles} mi ·{" "}
+                    {money(d.amount_cents)}
+                  </span>
+                </div>
+                {d.legs.map((l) => (
+                  <div key={l.id} className="mlg-day-leg">
+                    <span>
+                      {l.start_label || l.start_address || "—"} →{" "}
+                      {l.end_label || l.end_address || "—"}
+                    </span>
+                    <span>
+                      {l.business_miles} mi
+                      {l.entry_kind === "commute" ? " · personal" : ""}
+                      {l.entry_kind === "business" && l.miles_no_toll !== null
+                        ? l.used_tollway
+                          ? " · tollway"
+                          : " · back roads"
+                        : ""}
+                    </span>
                   </div>
-                )}
-                {report.status === "submitted" ? (
-                  <div className="exp-actions">
-                    <button
-                      type="button"
-                      className="btn btn-primary"
-                      disabled={busy}
-                      onClick={() => lifecycle("approve")}
-                    >
-                      <Check size={16} /> Approve
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      disabled={busy}
-                      onClick={() => lifecycle("reject")}
-                    >
-                      <Undo2 size={16} /> Send back to draft
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    disabled={busy}
-                    onClick={() => lifecycle("pay")}
-                  >
-                    <Check size={16} /> Mark paid
-                  </button>
-                )}
-              </div>
-            ) : (
-              <div className="exp-manager">
-                <h3>Manager review</h3>
-                <p className="card-meta">
-                  {me && Number(me.id) === report.user_id
-                    ? report.status === "submitted"
-                      ? "Your report is with a manager for review. A manager other than you approves it."
-                      : "Approved — a manager other than you marks it paid."
-                    : report.status === "submitted"
-                      ? "This report is with a manager for review."
-                      : "Approved — waiting for a manager to mark it paid."}
-                </p>
+                ))}
               </div>
             ))}
-        </>
-      )}
+            {report.days.length > 0 && (
+              <div className="mlg-day-head mlg-report-total">
+                <strong>Totals</strong>
+                <span>
+                  Billable {report.total_billable_miles} mi · Personal{" "}
+                  {report.total_personal_miles} mi · Driven{" "}
+                  {report.total_driven_miles} mi ·{" "}
+                  <strong>{money(report.total_amount_cents)}</strong>
+                </span>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </section>
+  );
+}
+
+// ---------- stop row + editor ----------
+
+function StopRow({
+  stop,
+  patients,
+  homeStop,
+  officeStop,
+  editing,
+  onEdit,
+  onDone,
+  onCancel,
+  onRemove,
+}: {
+  stop: Stop;
+  patients: PersonUnderCare[];
+  homeStop: () => Promise<Stop | null>;
+  officeStop: (() => Promise<Stop | null>) | null;
+  editing: boolean;
+  onEdit: () => void;
+  onDone: (s: Stop) => void;
+  onCancel: () => void;
+  onRemove: () => void;
+}) {
+  const kindLabel =
+    stop.kind === "home"
+      ? "Home"
+      : stop.kind === "office"
+        ? "Agency office"
+        : stop.kind === "patient"
+          ? "Patient"
+          : "Stop";
+  return (
+    <div className="mlg-stop">
+      <div className="mlg-stop-main">
+        <span className="mlg-stop-kind">{kindLabel}</span>
+        <strong>{stop.label || stop.address || "New stop"}</strong>
+        {stop.label && stop.address && <span className="mlg-stop-addr">{stop.address}</span>}
+        {!stop.label && !stop.address && (
+          <span className="mlg-stop-addr">Tap Edit to set this stop.</span>
+        )}
+      </div>
+      {!editing && (
+        <div className="mlg-stop-actions">
+          <button type="button" className="btn btn-small" onClick={onEdit}>
+            <Pencil size={14} /> Edit
+          </button>
+          <button type="button" className="btn btn-small" onClick={onRemove} aria-label="Remove stop">
+            <Trash2 size={14} />
+          </button>
+        </div>
+      )}
+      {editing && (
+        <StopEditor
+          stop={stop}
+          patients={patients}
+          homeStop={homeStop}
+          officeStop={officeStop}
+          onDone={onDone}
+          onCancel={onCancel}
+        />
+      )}
+    </div>
+  );
+}
+
+function StopEditor({
+  stop,
+  patients,
+  homeStop,
+  officeStop,
+  onDone,
+  onCancel,
+}: {
+  stop: Stop;
+  patients: PersonUnderCare[];
+  homeStop: () => Promise<Stop | null>;
+  officeStop: (() => Promise<Stop | null>) | null;
+  onDone: (s: Stop) => void;
+  onCancel: () => void;
+}) {
+  const [draft, setDraft] = useState<Stop>(stop);
+  const [addrText, setAddrText] = useState(stop.address);
+  const [patientQuery, setPatientQuery] = useState("");
+  const [pickError, setPickError] = useState("");
+
+  const matches = patientQuery.trim()
+    ? patients
+        .filter((p) =>
+          `${p.lname ?? ""} ${p.fname ?? ""} ${p.name}`
+            .toLowerCase()
+            .includes(patientQuery.toLowerCase()),
+        )
+        .slice(0, 6)
+    : [];
+
+  const pickPatient = (p: PersonUnderCare) => {
+    const address = joinAddress(p.street, p.city, p.state, p.postalCode);
+    setDraft({
+      ...draft,
+      kind: "patient",
+      label: p.lname && p.fname ? `${p.lname}, ${p.fname}` : p.name,
+      address,
+      lat: p.latitude ?? null,
+      lng: p.longitude ?? null,
+      patient_id: p.id,
+    });
+    setAddrText(address);
+    setPatientQuery("");
+  };
+
+  const pickKnown = async (which: "home" | "office") => {
+    setPickError("");
+    const s = which === "home" ? await homeStop() : officeStop ? await officeStop() : null;
+    if (!s) {
+      setPickError(
+        which === "home"
+          ? "No home address on your staff profile yet."
+          : "That agency has no address on file.",
+      );
+      return;
+    }
+    setDraft({ ...s, key: draft.key });
+    setAddrText(s.address);
+  };
+
+  return (
+    <div className="mlg-editor">
+      <div className="mlg-chips">
+        <button type="button" className="btn btn-small" onClick={() => void pickKnown("home")}>
+          <Home size={14} /> Home
+        </button>
+        <button type="button" className="btn btn-small" onClick={() => void pickKnown("office")}>
+          <Building2 size={14} /> Office
+        </button>
+        <span className="mlg-hint">…or find a patient, or type any address:</span>
+      </div>
+      {pickError && <p className="exp-error">{pickError}</p>}
+      <input
+        type="text"
+        placeholder="Search patients by name…"
+        value={patientQuery}
+        onChange={(e) => setPatientQuery(e.target.value)}
+      />
+      {matches.length > 0 && (
+        <div className="mlg-patient-results">
+          {matches.map((p) => (
+            <button key={p.id} type="button" onClick={() => pickPatient(p)}>
+              <strong>
+                {p.lname && p.fname ? `${p.lname}, ${p.fname}` : p.name}
+              </strong>
+              <span>{joinAddress(p.street, p.city, p.state, p.postalCode)}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="form-field">
+        <span>Address</span>
+        <AddressAutocomplete
+          value={addrText}
+          onChange={(v) => {
+            setAddrText(v);
+            // Typing over a picked patient turns the stop into
+            // a plain address stop; Home/Office keep their
+            // labels (their profile address is being edited).
+            setDraft((d) => ({
+              ...d,
+              kind: d.kind === "patient" ? "custom" : d.kind,
+              address: v,
+              lat: null,
+              lng: null,
+              patient_id: null,
+              label: d.kind === "patient" ? "" : d.label,
+            }));
+          }}
+          onSelectAddress={(a: SuggestedAddress) => {
+            const address = suggestedToAddress(a);
+            setAddrText(address);
+            setDraft((d) => ({
+              ...d,
+              kind: d.kind === "patient" ? "custom" : d.kind,
+              address,
+              lat: a.latitude,
+              lng: a.longitude,
+              patient_id: null,
+              label: d.kind === "patient" ? "" : d.label,
+            }));
+          }}
+        />
+      </div>
+      {(draft.label || draft.address) && (
+        <p className="mlg-hint">
+          <MapPin size={13} /> {draft.label ? `${draft.label} — ` : ""}
+          {draft.address}
+          {draft.lat === null ? " (no coordinates — routing unavailable, type the miles)" : ""}
+        </p>
+      )}
+      <div className="mlg-editor-actions">
+        <button type="button" className="btn btn-primary" onClick={() => onDone(draft)}>
+          <Check size={15} /> Done
+        </button>
+        <button type="button" className="btn" onClick={onCancel}>
+          <X size={15} /> Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ---------- leg row ----------
+
+function LegRow({
+  leg,
+  kind,
+  onToggle,
+  onMiles,
+  onKind,
+}: {
+  leg: LegState;
+  kind: "business" | "commute";
+  onToggle: (tollway: boolean) => void;
+  onMiles: (v: string) => void;
+  onKind: (k: "business" | "commute") => void;
+}) {
+  return (
+    <div className={`mlg-leg${kind === "commute" ? " mlg-leg-fixed" : ""}`}>
+      <span className="mlg-arrow">↓</span>
+      <div className="mlg-leg-miles">
+        <input
+          type="number"
+          min="0"
+          step="0.1"
+          value={leg.miles}
+          placeholder="0.0"
+          onChange={(e) => onMiles(e.target.value)}
+          aria-label="Leg miles"
+        />
+        <span>mi</span>
+      </div>
+      {kind === "business" ? (
+        <div className="mlg-seg" role="group" aria-label="Route used">
+          <button
+            type="button"
+            className={leg.used_tollway ? "on" : ""}
+            onClick={() => onToggle(true)}
+          >
+            Tollway
+          </button>
+          <button
+            type="button"
+            className={!leg.used_tollway ? "on alt" : ""}
+            onClick={() => onToggle(false)}
+          >
+            Back roads
+          </button>
+        </div>
+      ) : (
+        <span className="mlg-hint">Fixed — set by the addresses</span>
+      )}
+      <span className="mlg-leg-note">
+        {leg.routing
+          ? "Routing…"
+          : leg.route_failed
+            ? "Routing unavailable — type the miles."
+            : leg.miles_toll !== null || leg.miles_no_toll !== null
+              ? `Tollway ${leg.miles_toll ?? "—"} · Back roads ${leg.miles_no_toll ?? "—"}`
+              : ""}
+      </span>
+      <button
+        type="button"
+        className={`mlg-badge ${kind === "commute" ? "mlg-badge-pers" : "mlg-badge-bill"}`}
+        onClick={() => onKind(kind === "commute" ? "business" : "commute")}
+        title="Tap to switch billable / personal"
+      >
+        {kind === "commute" ? "Personal" : "Billable"}
+      </button>
+    </div>
   );
 }

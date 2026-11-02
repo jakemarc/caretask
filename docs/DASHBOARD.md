@@ -115,7 +115,7 @@ replaced by floating glass chrome — menu circle top-left
 (sidebar becomes a slide-in drawer; theme + sign out at its
 foot), desktop-view toggle circle top-right, and a floating
 pill footer (Dashboard / Patients / Mileage / Calendar;
-Mileage auto-opens the current month's expense report).
+Mileage opens the mileage day log on today).
 Patients on mobile: floating translucent search whose funnel
 holds the only filter — Status, default Active — while search
 itself searches all patients and overrides the filter; the
@@ -666,31 +666,35 @@ restrictions, not by secrecy).
   maps to patients' care note only.
 
 - **Record → Expenses** (`ExpensesView.tsx` +
-  `lib/expensesApi.ts`; 2026-11-01, live via deploy-18): a direct
-  sidebar button under Record (same no-submenu treatment as
-  Patients). The list view is the clinician's **previous
-  expense reports** (managers see everyone's) plus a
-  new-report form (month picker + optional friendly name).
-  The detail view shows day-grouped mileage with the
-  driven − commute = reimbursable math per day, the
-  non-mileage lines, and totals (reimbursable miles, mileage
-  $, other $, report total). **Mileage form (Jake's spec):**
-  From/To fields take the shared AddressAutocomplete OR a
-  **Nearest home** button — one GPS fix, the closest patient
-  home by coordinates is filled in as a labeled suggestion
-  (never silent; a hint names the patient and distance, and
-  the address stays editable). **Calculate road miles** calls
-  `POST /mileage/route` and shows both figures (tollway /
-  no tolls); **I took the tollway** makes the toll figure the
-  leg's miles even when longer; round trip doubles the chosen
-  figure; miles stay hand-editable (a hand edit wins over
-  later checkbox changes). Saving a leg chains the next leg's
-  From to this leg's To. **Lifecycle:** Submit for payment
-  (two-step confirm) locks a draft; the Manager review block
-  (PIN) approves / sends back / marks paid with an optional
-  payment reference. **Print report** opens a clean print
-  window (day tables + totals). Fails closed like the CSV
-  card: with the API unreachable the view is a notice only.
+  `lib/expensesApi.ts`; REBUILT 2026-11-02 as a mileage day
+  log, LIVE via deploy-27): the view is now **Mileage** — a
+  per-day chain editor plus a report generator; there is no
+  approval flow and no report envelopes in the UI. The chain
+  builds itself: Home -> Office bookends are fixed PERSONAL
+  legs (addresses from the clinician's staff profile and the
+  agency profile, geocoded client-side; their routed miles
+  snapshot onto the day's legs at save). Stops added between
+  them are billable legs in visit order, ending back at the
+  office. Every stop can be set three ways: tap **Home** /
+  **Office**, pick a **patient** (name search; address +
+  coordinates + patient link come from the record), or type
+  any address in the shared AddressAutocomplete. Legs route
+  automatically when both endpoints have coordinates
+  (`POST /mileage/route`); each billable leg carries a
+  **Tollway / Back roads** toggle (default tollway; both
+  figures shown), miles stay hand-editable, and the
+  Billable/Personal badge can be tapped to override the
+  derived kind. Day totals split billable / personal /
+  driven / reimbursement at the day's rate (localStorage
+  `caretask-mileage-rate`). Switching date or agency with
+  unsaved changes is refused. **Expense report** card:
+  month preset or custom range + agency filter (or all) ->
+  generated day-by-day report with per-leg detail and a
+  Print / PDF button (print CSS isolates the report block).
+  Fails closed like before: with the API unreachable the
+  view is a notice only. The old envelope UI (report list,
+  submit / manager review / print window) is gone; legacy
+  reports remain readable through the API only.
 
 ## Build & deploy
 
