@@ -1353,16 +1353,29 @@ export default function Dashboard({
       return;
     }
     let cancelled = false;
-    listPatients(user)
-      .then((loaded) => {
-        if (cancelled) return;
-        setPeople(loaded);
-        setSelectedId(loaded[0]?.id ?? "");
-        setApiStatus("connected");
-      })
-      .catch(() => {
-        if (!cancelled) setApiStatus("fallback");
-      });
+    // One retry before the fallback verdict (Jake, 2026-11-02):
+    // a single failed check used to brand the whole session
+    // "API unreachable" even when the API was fine a second
+    // later (a slow connection, a token still refreshing, a
+    // stray tab's stale session). Two failures in a row, ~1.5s
+    // apart, is a much more honest signal.
+    (async () => {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const loaded = await listPatients(user);
+          if (cancelled) return;
+          setPeople(loaded);
+          setSelectedId(loaded[0]?.id ?? "");
+          setApiStatus("connected");
+          return;
+        } catch {
+          if (cancelled) return;
+          if (attempt === 0)
+            await new Promise((r) => setTimeout(r, 1500));
+        }
+      }
+      if (!cancelled) setApiStatus("fallback");
+    })();
     return () => {
       cancelled = true;
     };

@@ -25,7 +25,8 @@ lib/pin.js           scrypt PIN hashing/verification
 lib/requireManagerPin.js  X-Manager-Pin middleware
 lib/hashChain.js     canonical hash form for audit/event rows
 lib/eventLog.js      event insert helpers
-lib/requestLog.js    request → event_log folding (method/path/status only)
+lib/requestLog.js    request → event_log folding (method/path/status;
+                     auth_failure rows also carry details.auth — see below)
 schema.sql           patients + audit_log (base)
 schema-events.sql    event_log + hash-chain columns/triggers
 schema-patients-v2.sql  patients v2 migration (DESTRUCTIVE — demo only)
@@ -40,7 +41,14 @@ e2e-*.js             four end-to-end suites (see DEVELOPMENT.md)
 ## Endpoint map
 
 Auth: all routes except `/health` require a Firebase ID token from
-an `ALLOWED_EMAILS` account.
+an `ALLOWED_EMAILS` account. Since 2026-11-02 every auth rejection
+also records its reason on the `auth_failure` event
+(`details.auth.reason`: `missing_or_malformed_header`,
+`not_on_allowlist` — with the verified account's email — or
+`token_verification_failed` with the firebase-admin error code in
+`details.auth.code`). Response codes are unchanged: 401 for a
+missing/invalid token, 403 only for a verified token whose email
+is not allowlisted.
 
 | Route | Notes |
 |---|---|

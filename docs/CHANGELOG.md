@@ -6,6 +6,41 @@ built and verified but not deployed.
 
 ## 2026-11-02
 
+- **Auth diagnostics + dashboard retry — Live 2026-11-02
+  (API: surgical in-place edit on the VM, no deployment URL;
+  dashboard deploy-20: bundle `index-dsXGun7Q.js`, deployment
+  https://f1ed4a0c.marcinnotech-app.pages.dev, verified —
+  Cloudflare API reports it as the project's canonical
+  production deployment, the deployment URL serves the new
+  bundle, the new asset returns 200 on the main domain, API
+  health green; token `marcinnotech-app-deploy-20`).** Born of
+  the recurring "Patient API unreachable" banner (Nov 1 evening
+  + Nov 2 morning): the API was healthy throughout — event_log
+  showed the failing loads were 403s, and in this API a 403
+  means the token verified but its account was not on
+  `ALLOWED_EMAILS` (both of Jake's emails ARE on it; the failing
+  tab's identity was never identified because failures logged
+  no reason). Two changes: (1) **API** — `auth.js` records WHY
+  each auth rejection happened (`req.authFailure`:
+  `missing_or_malformed_header` / `not_on_allowlist` + the
+  account's email / `token_verification_failed` + the
+  firebase-admin error code; the token itself is never logged)
+  and `lib/requestLog.js` folds it into the `auth_failure`
+  event's details as `details.auth`. Response behavior is
+  unchanged (401/403 exactly as before) — additive detail on an
+  existing event type, per the standing "don't change how
+  logging works" rule. Verified live: no-header and
+  garbage-token probes logged the two reasons in production.
+  First whole-file transfer attempt corrupted in transit; the
+  byte-count safeguard caught it, backups were restored, and
+  the change shipped as in-place edits instead. (2)
+  **Dashboard** — the sign-in patients check now retries once
+  after ~1.5s before declaring the API unreachable, so one
+  slow/racing first attempt no longer brands a whole session
+  as demo-data fallback. Revert path: redeploy the deploy-19
+  build; API revert from `*.bak-2026-11-02-authlog` on the VM.
+  Source for both halves is on GitHub branch
+  `auth-diagnostics` and on main with this deploy.
 - **Mobile floating view — Live 2026-11-02 (deploy-19:
   dashboard bundle `index-CQDxFnPf.js`, deployment
   https://06bae334.marcinnotech-app.pages.dev, verified —
