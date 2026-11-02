@@ -9,11 +9,13 @@ Schemas (apply in this order): `patient-api/schema.sql`,
 `schema-messages.sql`,
 `schema-documents.sql`, `schema-agencies.sql`,
 `schema-agencies-cms.sql`, `schema-patients-agency.sql`,
-`schema-patients-age.sql`, `schema-expenses.sql`.
+`schema-patients-age.sql`, `schema-expense-reports.sql`,
+`schema-expenses.sql`.
 
 Tables: `patients`, `users`, `appointment_categories`,
 `appointment_statuses`, `appointments`, `messages`, `documents`,
-`agencies`, `expenses`, `audit_log`, `event_log`.
+`agencies`, `expense_reports`, `mileage_entries`, `expenses`,
+`audit_log`, `event_log`.
 
 ## patients (v2 — 48 columns)
 
@@ -194,34 +196,70 @@ counts only. BIGINT identity id (a directory table like
 users/appointments, not patients — agency ids never travel in
 URLs or event payloads the way patient UUIDs do).
 
+## expense_reports
+
+The monthly envelope (Jake's model, 2026-11-01;
+`schema-expense-reports.sql`; built locally and deployed
+2026-11-01, deploy-18): id (BIGINT identity — auto-generated, never
+typed or edited), `user_id` (BIGINT, FK → users.id — the
+report's owner, by id never by name), `agency_id` (nullable),
+`title` (friendly name; NULL → the UI generates one from
+period + agency), `period_start` / `period_end` (DATE,
+end ≥ start), `status` (draft / submitted / approved /
+rejected / paid — submission, approval, and payment are
+properties of the WHOLE report), `submitted_at`,
+`approved_by` (FK → users), `approved_at`, `paid_at`,
+`payment_ref`, `notes`, created_at / updated_at / deleted_at
+(soft delete; runtime user has no DELETE grant). 16 columns.
+
+## mileage_entries
+
+The individual drives inside a report (same schema file):
+id, `expense_report_id` (FK → expense_reports), `entry_date`,
+`seq`, `entry_kind` (business = a driven leg / commute = the
+day's home↔home-office deduction leg), start/end address
+text + coordinates, `appointment_id` (nullable FK),
+`miles_toll` / `miles_no_toll` (both routing figures stored
+so the report shows its work), `used_tollway`, `round_trip`,
+`business_miles` (the leg's FINAL miles — chosen route's
+figure, user-correctable), `rate_per_mile` (per-entry
+snapshot, nullable), `vehicle`, `notes`, timestamps,
+deleted_at. 21 columns. **Day math (API-side):** daily
+reimbursable = max(0, Σ business miles − Σ commute miles);
+mileage dollars come from reimbursable miles × the day's
+rate when every entry is rated.
+
 ## expenses
 
-One row per staff expense (`schema-expenses.sql`, built locally
-2026-10-31 — not yet deployed; schema only, no routes/UI yet):
-id (BIGINT identity), `user_id` (BIGINT, FK → users.id — the
-connection to staff is by id, never by name; the employee name
-shown in lists is read from `users` with a JOIN),
-`expense_date`, `category` (CHECK list of the twelve standard
-categories: mileage, parking, tolls, medical_supplies,
-office_supplies, meals, travel, lodging, phone_internet,
-training, licenses, other), `description`, `vendor_name`,
-`amount_cents` (INTEGER ≥ 0 — money is integer cents, never
-floats), `currency` (default 'USD'), `payment_method`
-(personal_card / company_card / cash / other, nullable),
-`receipt_url`, `agency_id` (BIGINT, FK → agencies.id, nullable),
-`status` (draft / submitted / approved / rejected /
-reimbursed), `submitted_at`, `approved_by` (BIGINT, FK →
-users.id), `approved_at`, `reimbursed_at`,
-`reimbursement_ref`, `notes`, created_at / updated_at /
-deleted_at (soft delete; the runtime user has no DELETE grant).
-21 columns. Mileage trip detail (from/to, miles, rate) is NOT
-stored here — it belongs in a future `mileage_entries` table
-linked by expense id; a mileage expense row carries only the
-computed total in `amount_cents`. Verified locally: full schema
-chain applies, the file applies twice, FK/CHECK constraints
-reject bad user ids, categories and negative amounts, and the
-JOIN returns the right name even for two staff with identical
-names.
+One row per non-mileage expense LINE inside a report
+(`schema-expenses.sql`, built locally 2026-10-31, revised
+2026-11-01 to the report model, deployed 2026-11-01 with
+deploy-18):
+id (BIGINT identity), `report_id` (BIGINT, FK →
+expense_reports.id, required — lines belong to a report),
+`user_id` (BIGINT, FK → users.id — the connection to staff
+is by id, never by name; the employee name shown in lists is
+read from `users` with a JOIN), `expense_date`, `category`
+(CHECK list of the twelve standard categories: mileage,
+parking, tolls, medical_supplies, office_supplies, meals,
+travel, lodging, phone_internet, training, licenses, other),
+`description`, `vendor_name`, `amount_cents` (INTEGER ≥ 0 —
+money is integer cents, never floats), `currency` (default
+'USD'), `payment_method` (personal_card / company_card /
+cash / other, nullable), `receipt_url`, `agency_id` (BIGINT,
+FK → agencies.id, nullable), `notes`, created_at /
+updated_at / deleted_at (soft delete; the runtime user has
+no DELETE grant). 17 columns. There are NO lifecycle columns
+here — the draft → submitted → approved → paid lifecycle
+moved up to `expense_reports` when the report model was
+adopted (2026-11-01); the pre-revision 21-column lifecycle
+version was never deployed, so the revision is in place.
+Verified locally: full schema chain applies with the new
+files, both apply twice, FK/CHECK constraints reject bad
+user ids, categories and negative amounts, the JOIN returns
+the right name even for two staff with identical names, and
+the expenses API suite passes end to end (42 checks incl.
+day math, lifecycle, PIN gates, cross-user isolation).
 
 ## audit_log (patient change history)
 

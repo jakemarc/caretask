@@ -27,7 +27,8 @@ src/
   components/
     AddressAutocomplete.tsx  Google Places engine + Nominatim fallback
     PatientMap.tsx           shared Leaflet map (zone/numbered/approx pins)
-    PatientsMapView.tsx      all-patients map (Patient submenu)
+    PatientsMapView.tsx      all-patients map (view retained; left the sidebar menu 2026-11-01)
+    ExpensesView.tsx         Record → Expenses: expense reports + mileage
     DayScheduleMap.tsx       calendar Map view + route optimization
     GoogleContactPicker.tsx  contacts import picker (single/multi)
     CsvImport.tsx            Settings → Database utilities (CSV import)
@@ -99,8 +100,14 @@ selector panel** (removed 2026-10-30, locally built): a plain
 full width — switching patients happens from the Patients
 tab (row click → profile). The Patient sidebar submenu
 likewise no longer carries a "Patient Profile" entry (removed
-2026-10-30, locally built) — Patients / Add Patient /
-Patients Map only; the profile view itself is unchanged. Displayed patient names carry **no
+2026-10-30, locally built). **The submenu itself is gone
+(2026-11-01, Jake):** Patients is a direct sidebar button
+that opens the Patients page — no chevron, no expansion.
+Add Patient moved onto the Patients page as a right-justified
+**Add Patient** button in the page head (a **+ icon only** on
+mobile, ≤720px), and Patients Map left the menu (the map
+view code stays in place, currently unreachable from the
+nav). Displayed patient names carry **no
 honorific title** (`fullName()` composes first/middle/last/
 suffix only; the stored `title` field is unchanged). The Patient Profile is deliberately slim: the
 header line shows a compact "74/F" (exact age from DOB + sex
@@ -580,7 +587,16 @@ restrictions, not by secrecy).
   rows into the SAME `ContactCandidate` shape as the People API
   import — one mapping vocabulary for both paths — plus the
   CSV-only title/suffix and a three-way phone split (Mobile →
-  cell, Home → home, Work/Main/Other → main). Birthday accepts
+  cell, Home → home, Work/Main/Other → main). The parser
+  accepts BOTH Google header dialects (2026-11-01 fix):
+  Takeout/People-style (Given Name / Family Name,
+  `Organization 1 - Name`) and the contacts.google.com export
+  (First Name / Last Name, `Organization Name`, no E-mail or
+  Gender columns) — before the fix, a file in the second
+  dialect parsed to zero contacts and the preview reported
+  "No importable contacts were found in that file" (Jake's
+  own contacts.csv: 29 contacts, all importable after the
+  fix). Birthday accepts
   `YYYY-MM-DD` and `MM/DD/YYYY`; the yearless `--MM-DD` form
   maps to blank (a year is never invented). Region names map to
   state codes; Gender maps only onto the stored sex values.
@@ -613,6 +629,33 @@ restrictions, not by secrecy).
   sent (the `StaffInput` surface carries no address fields,
   same as the Google Contacts staff import), and the CSV note
   maps to patients' care note only.
+
+- **Record → Expenses** (`ExpensesView.tsx` +
+  `lib/expensesApi.ts`; 2026-11-01, live via deploy-18): a direct
+  sidebar button under Record (same no-submenu treatment as
+  Patients). The list view is the clinician's **previous
+  expense reports** (managers see everyone's) plus a
+  new-report form (month picker + optional friendly name).
+  The detail view shows day-grouped mileage with the
+  driven − commute = reimbursable math per day, the
+  non-mileage lines, and totals (reimbursable miles, mileage
+  $, other $, report total). **Mileage form (Jake's spec):**
+  From/To fields take the shared AddressAutocomplete OR a
+  **Nearest home** button — one GPS fix, the closest patient
+  home by coordinates is filled in as a labeled suggestion
+  (never silent; a hint names the patient and distance, and
+  the address stays editable). **Calculate road miles** calls
+  `POST /mileage/route` and shows both figures (tollway /
+  no tolls); **I took the tollway** makes the toll figure the
+  leg's miles even when longer; round trip doubles the chosen
+  figure; miles stay hand-editable (a hand edit wins over
+  later checkbox changes). Saving a leg chains the next leg's
+  From to this leg's To. **Lifecycle:** Submit for payment
+  (two-step confirm) locks a draft; the Manager review block
+  (PIN) approves / sends back / marks paid with an optional
+  payment reference. **Print report** opens a clean print
+  window (day tables + totals). Fails closed like the CSV
+  card: with the API unreachable the view is a notice only.
 
 ## Build & deploy
 

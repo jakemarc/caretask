@@ -131,6 +131,63 @@ aborts only this pass, recorded as `cms_error` in the event
 details alongside `cms_rows` / `cms_matched` /
 `cms_unmatched` counts.
 
+## Expense reports (routes/expenses.js, built locally 2026-11-01)
+
+Jake's model: one report per clinician per period (usually a
+month); mileage entries and non-mileage lines live inside it;
+the report is submitted, approved, and paid AS A WHOLE.
+Mounted at root in server.js (the router carries its own
+prefixes). Every route requires the caller to resolve to an
+active users row (403 `NO_STAFF_RECORD` otherwise).
+
+- `GET /expense-reports` — own reports; manager/admin roles
+  get everyone's (they run approval/payment). Bare array,
+  newest period first, soft-deleted excluded.
+- `POST /expense-reports` — create a draft (period required,
+  end ≥ start else 400 `PERIOD_INVALID`; title/agency
+  optional). The id is auto-generated.
+- `GET /expense-reports/:id` — the report PLUS its computed
+  summary: `days` (entries grouped by date with driven /
+  commute / reimbursable miles), `expenses` (lines), and
+  totals (`total_driven_miles`, `total_commute_miles`,
+  `total_reimbursable_miles`, `mileage_amount_cents`,
+  `expenses_amount_cents`, `total_amount_cents`). Non-owners
+  who aren't managers get 404 (existence isn't leaked).
+- `PUT /expense-reports/:id`, `DELETE /expense-reports/:id`
+  (soft) — owner only, draft only (409 `REPORT_LOCKED` after
+  submit).
+- `POST /expense-reports/:id/mileage` ·
+  `PUT|DELETE /expense-reports/:id/mileage/:entryId` —
+  mileage entries. `entry_kind` business | commute;
+  `business_miles` is the leg's FINAL miles (≥ 0, required);
+  both routing figures (`miles_toll`, `miles_no_toll`),
+  `used_tollway`, `round_trip`, and a `rate_per_mile`
+  snapshot ride along.
+- `POST /expense-reports/:id/expenses` ·
+  `PUT|DELETE /expense-reports/:id/expenses/:expenseId` —
+  non-mileage lines (category CHECK list, `amount_cents`
+  integer ≥ 0).
+- Lifecycle: `POST /:id/submit` (owner; draft → submitted,
+  stamps submitted_at) · `POST /:id/approve` (manager PIN;
+  records approved_by/at) · `POST /:id/reject` (manager PIN;
+  returns the report to draft, clears submitted_at) ·
+  `POST /:id/pay` (manager PIN; approved → paid, optional
+  payment_ref).
+- **Day math:** daily reimbursable = max(0, driven −
+  commute). Mileage dollars: when every entry carries a rate
+  (the normal one-rate month), each day claims
+  reimbursable × that day's rate, so a commute-heavy day can
+  never go negative; unrated entries count miles but no
+  dollars.
+- `POST /mileage/route` — `{start_lat, start_lng, end_lat,
+  end_lng}` → `{miles_toll, miles_no_toll}` from the public
+  Valhalla instance (lib/routing.js; either figure may be
+  null; both failing → 502 `ROUTE_FAILED`). Coordinates only;
+  demo-grade by design — miles are always hand-enterable.
+- Events: `expense_change` with ids + action only — never
+  addresses, amounts, or notes. Suite: `e2e-expenses-test.js`
+  (42 checks, all passing locally 2026-11-01).
+
 ## The manager-PIN gate (lib/requireManagerPin.js)
 
 - Header `X-Manager-Pin`; missing → 403 `PIN_REQUIRED`; malformed

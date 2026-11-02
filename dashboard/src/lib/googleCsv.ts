@@ -4,7 +4,12 @@
 // A Google Contacts export is the CSV form of Google People
 // contacts — same fields the People API import (googleContacts.ts)
 // maps, flattened into numbered columns ("E-mail 1 - Value",
-// "Phone 2 - Label", "Address 1 - Street", …). This module parses
+// "Phone 2 - Label", "Address 1 - Street", …). Google ships TWO
+// header dialects: Takeout/People-style (Given Name / Family
+// Name, "Organization 1 - Name") and the contacts.google.com
+// export (First Name / Last Name, "Organization Name", no
+// E-mail or Gender columns at all). The row mapping accepts
+// both. This module parses
 // the file and normalizes every row into the SAME ContactCandidate
 // shape the People import produces, so both import paths share one
 // mapping vocabulary. Two CSV-only extras ride alongside the
@@ -217,10 +222,15 @@ export function mapCountry(raw: string): string {
 function rowToContact(get: (h: string) => string, rowNum: number): CsvContact {
   // Name: structured parts first; when Given AND Family are both
   // empty, split the combined "Name" the way personToCandidate
-  // splits a displayName with no parts.
-  let fname = get("Given Name");
+  // splits a displayName with no parts. Two export dialects:
+  // Takeout/People-style files use Given Name / Family Name,
+  // while the contacts.google.com "Google CSV" export uses
+  // First Name / Last Name (found in the wild 2026-11-01 —
+  // Jake's own contacts.csv; a parser that only knew the first
+  // dialect read every row as nameless and imported nothing).
+  let fname = get("Given Name") || get("First Name");
   let mname = get("Middle Name") || get("Additional Name");
-  let lname = get("Family Name");
+  let lname = get("Family Name") || get("Last Name");
   const full = get("Name");
   if (!fname && !lname && full) {
     const parts = full.trim().split(/\s+/);
@@ -231,7 +241,10 @@ function rowToContact(get: (h: string) => string, rowNum: number): CsvContact {
   const displayName =
     [fname, mname, lname].filter(Boolean).join(" ") || full || "(no name)";
 
-  const email = numbered(get, "E-mail", "Value")[0] ?? "";
+  const email =
+    numbered(get, "E-mail", "Value")[0] ??
+    numbered(get, "Email", "Value")[0] ??
+    "";
 
   // Phones: label decides the slot. Mobile → cell, Home → home,
   // anything else (Work, Main, Other, no label) → main. The shared
@@ -306,8 +319,8 @@ function rowToContact(get: (h: string) => string, rowNum: number): CsvContact {
     dob: parseGoogleBirthday(get("Birthday")),
     sex: mapGender(get("Gender")),
     occupation: get("Occupation"),
-    organization: get("Organization 1 - Name"),
-    orgTitle: get("Organization 1 - Title"),
+    organization: get("Organization 1 - Name") || get("Organization Name"),
+    orgTitle: get("Organization 1 - Title") || get("Organization Title"),
     note: get("Notes") || get("Biography"),
   };
 
@@ -330,6 +343,8 @@ export function parseGoogleContactsCsv(text: string): CsvContact[] {
   const known = [
     "given name",
     "family name",
+    "first name",
+    "last name",
     "name",
     "e-mail 1 - value",
     "phone 1 - value",

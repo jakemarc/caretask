@@ -6,6 +6,71 @@ built and verified but not deployed.
 
 ## 2026-11-01
 
+- **Expense reports + mileage — Live 2026-11-01
+  (deploy-18: API migrations + routes on the VM, dashboard
+  bundle `index-1VzRC432.js`, deployment
+  https://1bfa5838.marcinnotech-app.pages.dev, verified —
+  API health green, /expense-reports answers 401 unauthed,
+  main URL serves the new bundle with all markers).** The full
+  monthly-report system: `expense_reports` (the envelope —
+  auto-generated id, optional friendly title, period, and the
+  draft → submitted → approved / paid lifecycle with manager
+  PIN on approve/reject/pay) + `mileage_entries` (legs with
+  entry_kind business/commute, both routing figures stored,
+  used_tollway, round trip, correctable final miles, rate
+  snapshot) + `expenses` revised to non-mileage lines hanging
+  off a report (its lifecycle columns moved up to the report;
+  the earlier version was never deployed). API
+  (`routes/expenses.js`, `lib/routing.js` — Valhalla tolls vs
+  no-tolls): per-day commute deduction with a zero floor,
+  owner-only draft editing, managers read all reports,
+  `expense_change` events carry ids/status only. Dashboard:
+  direct **Expenses** button under Record; list = previous
+  reports; detail = day-grouped mileage with the
+  driven − commute = reimbursable math, other-expense lines,
+  totals, print view, submit/approve/pay flow; the mileage
+  form takes autocomplete or a GPS **Nearest home** fill
+  (confirm-first), calculates road miles both ways, and
+  chains each leg's end into the next leg's start. Verified:
+  full schema chain applies (new files idempotent),
+  `e2e-expenses-test.js` 42/42 (day math, floor, lifecycle,
+  PIN gates, isolation), the patients e2e suite still fully
+  green (74 checks), dashboard bundle `index-1VzRC432.js`
+  carries all markers. Deploy-18 candidate (API migration + routes +
+  dashboard).
+- **Navigation: Patients submenu removed — Live
+  2026-11-01 (deploy-18, same bundle/deployment as above;
+  live bundle check: "Patients Map" occurs exactly once —
+  the retained view's heading).** Patients Map left
+  the submenu, then Add Patient, then the submenu itself:
+  **Patients is now a direct sidebar button** that opens the
+  Patients page — no chevron, no expansion (the group
+  open/close state and toggle handler are deleted). Add
+  Patient moved onto the Patients page: a right-justified
+  **Add Patient** button in the page head, collapsing to a
+  **+ icon only** at ≤720px. The Patients Map view code stays
+  in place (its heading is the one "Patients Map" string left
+  in the bundle) but is unreachable from the nav. Mockup
+  shown to Jake: `~/workspace/patients-nav-mockup.html`.
+- **CSV import: second Google header dialect — Live
+  2026-11-01 (deploy-18, dashboard bundle
+  `index-1VzRC432.js`, deployment
+  https://1bfa5838.marcinnotech-app.pages.dev, verified at
+  https://marcinnotech-app.pages.dev).** Jake's own contacts.csv (the contacts.google.com
+  export: First Name / Last Name, `Organization Name`, no
+  E-mail/Gender columns) imported nothing — the parser only
+  knew the Takeout/People dialect (Given Name / Family Name),
+  read every row as nameless, and the preview answered "No
+  importable contacts were found in that file." The row
+  mapping now accepts both dialects for names, organization,
+  and email groups, and the known-header check recognizes
+  First/Last Name. Verified against Jake's real file with the
+  real parser: 0 → 29 contacts, all 29 patient-import Ready
+  (24 with phones, 29 with addresses, no birthdays in the
+  file); an old-dialect fixture still parses 2/2 with all
+  fields intact. Dashboard-only change; shipped inside the
+  combined deploy-18 bundle (the standalone candidate bundle
+  was `index-C-v38TGT.js`).
 - **Patients rename + optional DOB/sex + stored age + Age/Sex
   column removal + CSV import fix — Live (2026-11-01, Jake;
   deploy-17: dashboard bundle `index-BwSBwNpi.js`, deployment

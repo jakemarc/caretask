@@ -5,6 +5,7 @@ import { auth } from "../lib/firebase";
 import { COLOR_THEMES, type ColorTheme, type Theme } from "../lib/theme";
 import Mark from "../components/Mark";
 import AddressAutocomplete from "../components/AddressAutocomplete";
+import ExpensesView from "../components/ExpensesView";
 import StateSelect from "../components/StateSelect";
 import {
   BarChart3,
@@ -12,8 +13,6 @@ import {
   Building2,
   CalendarCheck,
   CalendarDays,
-  ChevronDown,
-  ChevronRight,
   ChevronsLeft,
   ChevronsRight,
   ClipboardCheck,
@@ -28,6 +27,8 @@ import {
   Navigation,
   Pencil,
   Phone,
+  Plus,
+  Receipt,
   Search,
   Settings,
   Siren,
@@ -110,6 +111,7 @@ type Tab =
   | "triage"
   | "flags"
   | "reports"
+  | "expenses"
   | "contacts"
   | "settings"
   | "categories"
@@ -401,7 +403,9 @@ export default function Dashboard({
   const [flags, setFlags] = useState<Flag[]>(initialFlags);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [forceDesktop, setForceDesktop] = useState(false);
-  const [patientGroupOpen, setPatientGroupOpen] = useState(true);
+  // The Patients sidebar group open/close state lived here
+  // until 2026-11-01, when the submenu was removed entirely
+  // and Patients became a direct sidebar button.
   const [query, setQuery] = useState("");
   const listSearchRef = useRef<HTMLInputElement>(null);
   const [people, setPeople] = useState<PersonUnderCare[]>(peopleUnderCare);
@@ -1434,18 +1438,6 @@ export default function Dashboard({
     );
   }
 
-  function handlePatientGroupClick() {
-    if (
-      sidebarCollapsed ||
-      (!forceDesktop &&
-        window.matchMedia("(max-width: 720px)").matches)
-    ) {
-      setTab("list");
-    } else {
-      setPatientGroupOpen((o) => !o);
-    }
-  }
-
   async function handleAddPatient(e: React.FormEvent) {
     e.preventDefault();
     // Date of birth and Sex were required when ADDING a patient
@@ -1807,52 +1799,20 @@ export default function Dashboard({
               <span className="nav-icon"><LayoutDashboard size={20} /></span>
               <span className="nav-label">Dashboard</span>
             </button>
-            <div className="nav-group">
-              <button
-                className={patientActive ? "nav-btn active" : "nav-btn"}
-                onClick={handlePatientGroupClick}
-                title="Patients"
-              >
-                <span className="nav-icon"><Users size={20} /></span>
-                <span className="nav-label">
-                  Patients{" "}
-                  <span className="nav-chevron">
-                    {patientGroupOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                  </span>
-                </span>
-              </button>
-              {patientGroupOpen && (
-                <div className="nav-submenu">
-                  <button
-                    className={
-                      tab === "list" ? "nav-sub-btn active" : "nav-sub-btn"
-                    }
-                    onClick={() => setTab("list")}
-                  >
-                    Patients
-                  </button>
-                  {/* Patient Profile nav entry removed (Jake,
-                      2026-10-30) — the profile view stays reachable
-                      by clicking a patient in the Patient List. */}
-                  <button
-                    className={
-                      tab === "add" ? "nav-sub-btn active" : "nav-sub-btn"
-                    }
-                    onClick={() => setTab("add")}
-                  >
-                    Add Patient
-                  </button>
-                  <button
-                    className={
-                      tab === "map" ? "nav-sub-btn active" : "nav-sub-btn"
-                    }
-                    onClick={() => setTab("map")}
-                  >
-                    Patients Map
-                  </button>
-                </div>
-              )}
-            </div>
+            {/* Patients is a direct sidebar button (Jake,
+                2026-11-01): the group submenu (Patients /
+                Add Patient / Patients Map) was removed in
+                pieces — Add Patient moved onto the Patients
+                page as a button, Patients Map left the menu
+                (its view code stays in place). */}
+            <button
+              className={patientActive ? "nav-btn active" : "nav-btn"}
+              onClick={() => setTab("list")}
+              title="Patients"
+            >
+              <span className="nav-icon"><Users size={20} /></span>
+              <span className="nav-label">Patients</span>
+            </button>
             <button
               className={tab === "appointment" ? "nav-btn active" : "nav-btn"}
               onClick={() => setTab("appointment")}
@@ -1914,6 +1874,18 @@ export default function Dashboard({
             >
               <span className="nav-icon"><BarChart3 size={20} /></span>
               <span className="nav-label">Reports</span>
+            </button>
+            {/* Expenses (Jake, 2026-11-01): a direct button
+                under Record, same treatment as Patients —
+                monthly expense reports with mileage live
+                behind it. */}
+            <button
+              className={tab === "expenses" ? "nav-btn active" : "nav-btn"}
+              onClick={() => setTab("expenses")}
+              title="Expenses"
+            >
+              <span className="nav-icon"><Receipt size={20} /></span>
+              <span className="nav-label">Expenses</span>
             </button>
           </nav>
           <p className="nav-group-label">System</p>
@@ -2533,7 +2505,22 @@ export default function Dashboard({
             // the Dashboard overview.
             <section className="people-layout single">
               <div className="patient-list-panel">
-                <h1>Patients</h1>
+                <div className="page-head list-page-head">
+                  <h1>Patients</h1>
+                  {/* Add Patient lives on the page now (Jake,
+                      2026-11-01) — the sidebar submenu entries
+                      were removed the same day. On mobile the
+                      button collapses to a + icon (styles.css). */}
+                  <button
+                    className="btn btn-primary add-patient-btn"
+                    type="button"
+                    onClick={() => setTab("add")}
+                    title="Add Patient"
+                  >
+                    <Plus size={18} />
+                    <span className="add-patient-label">Add Patient</span>
+                  </button>
+                </div>
                 {/* Page search (Jake, 2026-10-30) — replaces the
                     zone legend; drives the shared query state and
                     visiblePeople filters from it. (The sidebar
@@ -3842,6 +3829,14 @@ export default function Dashboard({
                 </article>
               </div>
             </section>
+          )}
+
+          {tab === "expenses" && (
+            <ExpensesView
+              user={user}
+              people={people}
+              apiConnected={apiStatus === "connected"}
+            />
           )}
 
           {tab === "reports" && (

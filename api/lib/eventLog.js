@@ -11,7 +11,7 @@
 //   document_finalize). POST /events rejects these, so a client
 //   can never forge a server-side event.
 const CLIENT_EVENTS = ['sign_in', 'sign_out', 'report_export'];
-const SERVER_EVENTS = ['patient_view', 'auth_failure', 'api_request', 'admin_action', 'appointment_change', 'message_send', 'message_read', 'document_create', 'document_update', 'document_finalize', 'agency_sync'];
+const SERVER_EVENTS = ['patient_view', 'auth_failure', 'api_request', 'admin_action', 'appointment_change', 'message_send', 'message_read', 'document_create', 'document_update', 'document_finalize', 'agency_sync', 'expense_change'];
 const ALL_EVENTS = [...CLIENT_EVENTS, ...SERVER_EVENTS];
 
 // Insert one event_log row. `db` is a pool or a transaction client.
