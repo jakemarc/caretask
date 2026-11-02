@@ -6,6 +6,25 @@ built and verified but not deployed.
 
 ## 2026-11-02
 
+- **Reveal-menu hotfix — Live 2026-11-02 (deploy-29:
+  dashboard-only, bundle `index-Dhj0ZcU7.js`, deployment
+  https://6e3f9ff9.marcinnotech-app.pages.dev, verified —
+  Cloudflare API canonical deployment matches, deployment URL
+  serves the new bundle, main-domain asset 200, the live CSS
+  carries the fixed selector).** Jake's phone check caught the
+  Muse-style menu broken: the sidebar rendered displaced to
+  the right with a blank strip at the left and the page
+  squeezed off-edge. Root cause (in the source): the menu is a
+  `position: fixed` child of `.dashboard-body`, and deploy-28
+  slid the page by transforming `.dashboard-body` — a
+  transformed ancestor becomes the containing block for fixed
+  descendants, so the menu's `left: 0` anchored to the sliding
+  wrapper and the menu rode along with the page. Fix
+  (styles.css only): the slide targets `.app-main` — the
+  menu's sibling, not its parent — plus the top bar, fabs, and
+  pill as before; the menu stays pinned to the viewport's left
+  edge while the content slides to reveal it.
+
 - **The build queue ships — Live 2026-11-02 (deploy-28: API
   files + 2 migrations on the VM + dashboard bundle
   `index-DiCXGtUH.js`, deployment

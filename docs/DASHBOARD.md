@@ -757,9 +757,15 @@ batch agency assignment is the bulk fix).
 - **Menu (≤720px, not force-desktop):** the sidebar now rests
   UNDER the page at min(320px, 85vw) (visibility-toggled); opening
   the menu adds `.menu-open` to the shell and the page —
-  `.dashboard-body`, `.mobile-topbar`, the fabs, and the pill —
+  `.app-main`, `.mobile-topbar`, the fabs, and the pill —
   slides right by the same width (0.34s ease; the pill's -50%
-  centering is preserved by calc). The old scrim is now a
+  centering is preserved by calc). The slide target is
+  `.app-main`, never `.dashboard-body`: the sidebar is a fixed
+  child of `.dashboard-body`, and a transformed ancestor becomes
+  the containing block for fixed descendants — deploy-28 slid
+  `.dashboard-body` and dragged the menu right along with the
+  page (Jake's screenshot, 2026-11-02); deploy-29 fixed it by
+  sliding the sibling `.app-main` instead. The old scrim is now a
   transparent tap-to-close veil over the exposed page sliver with
   an inset shadow as the page's edge. Menu rows are 16px with
   13px padding. (In-body fixed elements — floating search, profile

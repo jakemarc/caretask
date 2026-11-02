@@ -4534,15 +4534,22 @@ label.contact-picker-row {
     padding-top: 10px;
   }
 
-  /* The page elements slide together. */
-  .app-shell:not(.force-desktop) .dashboard-body,
+  /* The page elements slide together. NOTE: the slide target is
+     .app-main, NOT .dashboard-body — the sidebar is a child of
+     .dashboard-body, and a transformed ancestor becomes the
+     containing block for the sidebar's position:fixed, which
+     dragged the menu right along with the page (deploy-28 bug,
+     fixed 2026-11-02 in deploy-29). .app-main is the sidebar's
+     sibling, so sliding it leaves the fixed menu anchored to
+     the viewport at the left edge. */
+  .app-shell:not(.force-desktop) .app-main,
   .app-shell:not(.force-desktop) .mobile-topbar,
   .app-shell:not(.force-desktop) .mobile-pill,
   .app-shell:not(.force-desktop) .mobile-fab {
     transition: transform 0.34s cubic-bezier(0.32, 0.72, 0.24, 1);
   }
 
-  .app-shell:not(.force-desktop).menu-open .dashboard-body,
+  .app-shell:not(.force-desktop).menu-open .app-main,
   .app-shell:not(.force-desktop).menu-open .mobile-topbar,
   .app-shell:not(.force-desktop).menu-open .mobile-fab {
     transform: translateX(min(320px, 85vw));
