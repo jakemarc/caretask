@@ -95,6 +95,9 @@ export default function CalendarView({
   );
   // Day shown by the Map view (independent of the month/week anchor).
   const [mapDay, setMapDay] = useState<Date>(() => startOfDay(new Date()));
+  // Agency filter (2026-11-02): appointments inherit their agency
+  // through the patient. "all" | "none" | an agency key.
+  const [agencyFilter, setAgencyFilter] = useState<string>("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
 
@@ -185,16 +188,57 @@ export default function CalendarView({
     };
   }, [apiConnected, user, range, refreshTick]);
 
+  // patient_id → agency {key, name}. The key prefers the linked
+  // directory id and falls back to the free-text name, matching
+  // how patients store agency (agency_id XOR agency_name_text).
+  const patientAgency = useMemo(() => {
+    const map = new Map<string, { key: string; name: string }>();
+    for (const p of patients) {
+      if (p.agencyId != null)
+        map.set(p.id, {
+          key: `id:${p.agencyId}`,
+          name: p.agencyName ?? `Agency #${p.agencyId}`,
+        });
+      else if (p.agencyName)
+        map.set(p.id, { key: `tx:${p.agencyName}`, name: p.agencyName });
+    }
+    return map;
+  }, [patients]);
+
+  const agencyOptions = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const a of patientAgency.values()) {
+      if (!seen.has(a.key)) seen.set(a.key, a.name);
+    }
+    return [...seen.entries()]
+      .map(([key, label]) => ({ key, label }))
+      .sort((x, y) => x.label.localeCompare(y.label));
+  }, [patientAgency]);
+
+  const agencyNameFor = (a: ApiAppointment): string | null =>
+    a.patient_id ? (patientAgency.get(a.patient_id)?.name ?? null) : null;
+
+  // Blocks (no patient) always show; patient appointments show
+  // when their agency matches the filter.
+  const visibleAppts = useMemo(() => {
+    if (agencyFilter === "all") return appts;
+    return appts.filter(
+      (a) =>
+        !a.patient_id ||
+        (patientAgency.get(a.patient_id)?.key ?? "none") === agencyFilter,
+    );
+  }, [appts, agencyFilter, patientAgency]);
+
   const byDay = useMemo(() => {
     const map = new Map<string, ApiAppointment[]>();
-    for (const a of appts) {
+    for (const a of visibleAppts) {
       const k = dayKey(new Date(a.starts_at));
       const arr = map.get(k) ?? [];
       arr.push(a);
       map.set(k, arr);
     }
     return map;
-  }, [appts]);
+  }, [visibleAppts]);
 
   const selected = appts.find((a) => a.id === selectedId) ?? null;
   const statusLabel = (code: string) =>
@@ -373,6 +417,9 @@ export default function CalendarView({
     >
       <span className="cal-chip-time">{fmtTime(a.starts_at)}</span>{" "}
       {a.patient_name ? shortName(a.patient_name) : a.title}
+      {agencyNameFor(a) && (
+        <span className="cal-chip-agency"> · {agencyNameFor(a)}</span>
+      )}
     </button>
   );
 
@@ -389,7 +436,7 @@ export default function CalendarView({
 
   const agendaDays = useMemo(() => {
     const days: { day: Date; items: ApiAppointment[] }[] = [];
-    const sorted = [...appts].sort(
+    const sorted = [...visibleAppts].sort(
       (x, y) => +new Date(x.starts_at) - +new Date(y.starts_at),
     );
     for (const a of sorted) {
@@ -399,7 +446,22 @@ export default function CalendarView({
       else days.push({ day: new Date(a.starts_at), items: [a] });
     }
     return days;
-  }, [appts]);
+  }, [visibleAppts]);
+
+  // Month-view legend (mobile markers): the visit types present
+  // in the current filtered set, with their colors.
+  const monthLegend = useMemo(() => {
+    const seen = new Map<string, { name: string; color: string }>();
+    for (const a of visibleAppts) {
+      if (!seen.has(a.category_id)) {
+        seen.set(a.category_id, {
+          name: a.category_name,
+          color: a.category_color,
+        });
+      }
+    }
+    return [...seen.values()].sort((x, y) => x.name.localeCompare(y.name));
+  }, [visibleAppts]);
 
   const dayList = (day: Date) => {
     const items = (byDay.get(dayKey(day)) ?? []).sort(
@@ -430,7 +492,8 @@ export default function CalendarView({
               <span className="card-meta">
                 {" "}
                 · {a.category_name}
-                {a.provider_name ? ` · ${a.provider_name}` : ""} ·{" "}
+                {a.provider_name ? ` · ${a.provider_name}` : ""}
+                {agencyNameFor(a) ? ` · ${agencyNameFor(a)}` : ""} ·{" "}
                 {statusLabel(a.status)}
               </span>
             </span>
@@ -491,6 +554,23 @@ export default function CalendarView({
                   {v[0].toUpperCase() + v.slice(1)}
                 </button>
               ))}
+              {agencyOptions.length > 0 && (
+                <select
+                  className="cal-agency-filter"
+                  value={agencyFilter}
+                  onChange={(e) => setAgencyFilter(e.target.value)}
+                  aria-label="Filter appointments by agency"
+                  title="Show appointments for one agency"
+                >
+                  <option value="all">All agencies</option>
+                  {agencyOptions.map((o) => (
+                    <option key={o.key} value={o.key}>
+                      {o.label}
+                    </option>
+                  ))}
+                  <option value="none">No agency</option>
+                </select>
+              )}
               <button
                 className="btn btn-primary"
                 onClick={() => openCreate(anchor)}
@@ -527,16 +607,45 @@ export default function CalendarView({
                       onDoubleClick={() => openCreate(day)}
                     >
                       <span className="cal-date">{day.getDate()}</span>
-                      {items.slice(0, 3).map(chip)}
-                      {items.length > 3 && (
-                        <span className="cal-more">
-                          +{items.length - 3} more
-                        </span>
-                      )}
+                      <span className="cal-cell-chips">
+                        {items.slice(0, 3).map(chip)}
+                        {items.length > 3 && (
+                          <span className="cal-more">
+                            +{items.length - 3} more
+                          </span>
+                        )}
+                      </span>
+                      <span className="cal-month-markers" aria-hidden="true">
+                        {items.slice(0, 3).map((a) => (
+                          <span
+                            key={a.id}
+                            className="cal-marker"
+                            style={{ background: a.category_color }}
+                          />
+                        ))}
+                        {items.length > 3 && (
+                          <span className="cal-marker-more">
+                            +{items.length - 3}
+                          </span>
+                        )}
+                      </span>
                     </div>
                   );
                 })}
               </div>
+              {monthLegend.length > 0 && (
+                <div className="cal-legend" aria-label="Appointment type colors">
+                  {monthLegend.map((c) => (
+                    <span key={c.name} className="cal-legend-item">
+                      <span
+                        className="cal-legend-dot"
+                        style={{ background: c.color }}
+                      />
+                      {c.name}
+                    </span>
+                  ))}
+                </div>
+              )}
               {dayList(
                 monthCells.find((d) => dayKey(d) === selectedDay) ??
                   new Date(),
@@ -581,6 +690,7 @@ export default function CalendarView({
                         </span>
                         <span className="card-meta">
                           {a.category_name}
+                          {agencyNameFor(a) ? ` · ${agencyNameFor(a)}` : ""}
                         </span>
                       </button>
                     ))}
@@ -630,7 +740,8 @@ export default function CalendarView({
                           {a.provider_name
                             ? ` · ${a.provider_name}`
                             : ""}{" "}
-                          · {statusLabel(a.status)}
+                          {agencyNameFor(a) ? ` · ${agencyNameFor(a)}` : ""} ·{" "}
+                {statusLabel(a.status)}
                         </span>
                       </span>
                     </button>
@@ -644,7 +755,7 @@ export default function CalendarView({
             <DayScheduleMap
               date={mapDay}
               onDateChange={(d) => setMapDay(startOfDay(d))}
-              appointments={appts}
+              appointments={visibleAppts}
               patients={patients}
               onOpenPatient={onOpenPatient}
             />

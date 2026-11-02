@@ -17,6 +17,12 @@ import {
   ChevronsRight,
   ClipboardCheck,
   Clock,
+  Cloud,
+  CloudLightning,
+  CloudMoon,
+  CloudRain,
+  CloudSnow,
+  CloudSun,
   Flag as FlagIcon,
   Filter,
   HeartPulse,
@@ -56,13 +62,26 @@ import {
 } from "../lib/demoData";
 import { downloadReportPdf } from "../lib/reportPdf";
 import GoogleContactPicker from "../components/GoogleContactPicker";
-import { formatUSPhone, telHref } from "../lib/phone";
+import {
+  callingHref, formatUSPhone, telHref } from "../lib/phone";
 import CalendarView from "../components/CalendarView";
 import PatientsMapView from "../components/PatientsMapView";
 import { toMapPatient } from "../lib/geo";
 import MessagesView from "../components/MessagesView";
 import PatientMessages from "../components/PatientMessages";
 import ClinicalDocuments from "../components/ClinicalDocuments";
+import MergeReview from "../components/MergeReview";
+import CallingAppSettings from "../components/CallingAppSettings";
+import PhotoIntake from "../components/PhotoIntake";
+import TasksPanel from "../components/TasksPanel";
+import NewsCard from "../components/NewsCard";
+import NewsTopicsSettings from "../components/NewsTopicsSettings";
+import {
+  daypartOf,
+  fetchWeather,
+  seasonOf,
+  type WeatherNow,
+} from "../lib/overviewClock";
 import VisitCategoriesSettings from "../components/VisitCategoriesSettings";
 import AgencyView from "../components/AgencyView";
 import AgencyPicker from "../components/AgencyPicker";
@@ -76,9 +95,11 @@ import {
   createStaff,
   deactivateStaff,
   deletePatient,
+  markDuplicatePair,
   getPatient,
   isApiConfigured,
   isRoleRejection,
+  listAppointments,
   listEvents,
   listPatients,
   listMessages,
@@ -423,6 +444,10 @@ export default function Dashboard({
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
   const [expensesAutoOpen, setExpensesAutoOpen] = useState(false);
   const listSearchRef = useRef<HTMLInputElement>(null);
+  // Mobile profile swipe (2026-11-02): touch origin for the
+  // profile card + the direction the current card slid in from.
+  const profileTouchRef = useRef<{ x: number; y: number } | null>(null);
+  const [swipeDir, setSwipeDir] = useState<"left" | "right" | null>(null);
   const [people, setPeople] = useState<PersonUnderCare[]>(peopleUnderCare);
   const [selectedId, setSelectedId] = useState(peopleUnderCare[0].id);
   // Where the patient list comes from: "local" (no API configured),
@@ -433,6 +458,62 @@ export default function Dashboard({
   >("local");
   // Unread message count for the Messages nav badge.
   const [unreadCount, setUnreadCount] = useState(0);
+  // Dashboard overview cards (Jake, 2026-11-02): card one is a
+  // live clock (ticking every 20s) with a weather icon; card two
+  // counts today's appointments for its workload color band.
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 20000);
+    return () => clearInterval(t);
+  }, []);
+  const [weather, setWeather] = useState<WeatherNow | null>(null);
+  useEffect(() => {
+    let live = true;
+    const load = () => {
+      void fetchWeather().then((w) => {
+        if (live && w) setWeather(w);
+      });
+    };
+    load();
+    const t = setInterval(load, 30 * 60 * 1000);
+    return () => {
+      live = false;
+      clearInterval(t);
+    };
+  }, []);
+  const [todayApptCount, setTodayApptCount] = useState<number | null>(
+    null,
+  );
+  useEffect(() => {
+    if (apiStatus !== "connected") {
+      setTodayApptCount(daySchedule.length);
+      return;
+    }
+    let live = true;
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 1);
+    listAppointments(user, start.toISOString(), end.toISOString())
+      .then((list) => {
+        if (live) {
+          setTodayApptCount(
+            list.filter(
+              (a) =>
+                a.cattype === "appointment" &&
+                a.status !== "cancelled" &&
+                a.status !== "no_show",
+            ).length,
+          );
+        }
+      })
+      .catch(() => {
+        if (live) setTodayApptCount(null);
+      });
+    return () => {
+      live = false;
+    };
+  }, [apiStatus, user, tab]);
   // Add Patient form (patients v2 fields). Grouped in the JSX as:
   // name / contact / demographics / care & consent / emergency
   // contact / billing. Required: first name + last name.
@@ -492,7 +573,10 @@ export default function Dashboard({
   // the Add Patient form below — nothing is saved by the import
   // itself. The duplicate check reacts to the filled names exactly
   // as if they were typed, and Save goes through the normal path.
-  const [showPatientImport, setShowPatientImport] = useState(false);
+  // (The Add form's Google Contacts import button was removed at
+  // Jake's direction 2026-11-02; the picker still serves the
+  // Clinician tab's staff import.)
+  const [showPhotoIntake, setShowPhotoIntake] = useState(false);
 
   function applyContactToPatientForm(c: ContactCandidate) {
     setFormFname(c.fname);
@@ -597,6 +681,12 @@ export default function Dashboard({
   const [deleteError, setDeleteError] = useState("");
   const [statusSaving, setStatusSaving] = useState(false);
   const [statusError, setStatusError] = useState("");
+  // Mark-as-duplicate (patient merge round, 2026-11-02): the
+  // profile's picker for the OTHER record of a suspected pair.
+  const [dupPickerOpen, setDupPickerOpen] = useState(false);
+  const [dupQuery, setDupQuery] = useState("");
+  const [dupNote, setDupNote] = useState("");
+  const [dupBusy, setDupBusy] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState("");
@@ -1062,6 +1152,65 @@ export default function Dashboard({
     setConfirmingDelete(false);
     setSelectedId(remaining[0]?.id ?? "");
     setTab("list");
+  }
+
+  // Patient merge (2026-11-02): mark this record as a suspected
+  // duplicate of another. The review + merge itself lives on the
+  // Patients tab (MergeReview). Connected mode only — demo data
+  // has no server to mark against.
+  async function handleMarkDuplicate(otherId: string, otherName: string) {
+    setDupBusy(true);
+    try {
+      await markDuplicatePair(user, selectedPerson.id, otherId);
+      setDupPickerOpen(false);
+      setDupQuery("");
+      setDupNote(
+        `Marked as a possible duplicate of ${otherName}. Review the pair from the Patients list.`,
+      );
+    } catch {
+      setDupNote(
+        "That mark didn't save — check the connection and try again.",
+      );
+    } finally {
+      setDupBusy(false);
+    }
+  }
+
+  // After a merge (or an undo), reload the patient list and keep
+  // the selection on a live record: if the selected patient was
+  // the one retired, follow to the kept record.
+  async function handleMerged(survivorId: string, loserId: string) {
+    try {
+      const loaded = await listPatients(user);
+      setPeople(loaded);
+      if (selectedId === loserId) setSelectedId(survivorId);
+    } catch {
+      // The merge itself succeeded; a stale list refreshes on the
+      // next load.
+    }
+  }
+
+  function openPatientById(id: string) {
+    setSwipeDir(null);
+    setSelectedId(id);
+    setTab("profile");
+  }
+
+  // Swipe/button navigation between profiles, following the
+  // Patients list's visible order (mobilePeople — sorted, with
+  // the status filter/search applied). No wrap at the ends; a
+  // profile outside the current filter doesn't swipe.
+  function swipeProfile(dir: "next" | "prev") {
+    if (editing || confirmingDelete) return;
+    const idx = mobilePeople.findIndex((p) => p.id === selectedId);
+    if (idx < 0) return;
+    const target = mobilePeople[dir === "next" ? idx + 1 : idx - 1];
+    if (!target) return;
+    setSwipeDir(dir === "next" ? "left" : "right");
+    setDupPickerOpen(false);
+    setDupNote("");
+    setStatusError("");
+    setSelectedId(target.id);
   }
 
   // Clinician list management: move a patient off (or back onto)
@@ -1538,7 +1687,42 @@ export default function Dashboard({
 
   const maxBar = Math.max(...analytics.weeklyFlagsReviewed);
   const openFlags = flags.filter((f) => f.decision === "open");
-  const urgentTickets = sortedTickets.filter((t) => t.priority === "P1");
+  // Card two's workload band (Jake, 2026-11-02 — his ranges
+  // overlapped at the edges; resolved as 1–3 green, 4 yellow,
+  // 5–7 red, 8+ deep red, 0 = plain card).
+  const apptBand =
+    todayApptCount === null || todayApptCount === 0
+      ? "band-none"
+      : todayApptCount <= 3
+        ? "band-green"
+        : todayApptCount === 4
+          ? "band-yellow"
+          : todayApptCount <= 7
+            ? "band-red"
+            : "band-deepred";
+  const weatherIcon = !weather ? (
+    <CloudSun size={40} aria-hidden="true" />
+  ) : weather.group === "clear" ? (
+    weather.isDay ? (
+      <Sun size={40} aria-hidden="true" />
+    ) : (
+      <Moon size={40} aria-hidden="true" />
+    )
+  ) : weather.group === "partly" ? (
+    weather.isDay ? (
+      <CloudSun size={40} aria-hidden="true" />
+    ) : (
+      <CloudMoon size={40} aria-hidden="true" />
+    )
+  ) : weather.group === "rain" || weather.group === "drizzle" ? (
+    <CloudRain size={40} aria-hidden="true" />
+  ) : weather.group === "snow" ? (
+    <CloudSnow size={40} aria-hidden="true" />
+  ) : weather.group === "thunder" ? (
+    <CloudLightning size={40} aria-hidden="true" />
+  ) : (
+    <Cloud size={40} aria-hidden="true" />
+  );
 
   const q = query.trim().toLowerCase();
   const visiblePeople = q
@@ -1645,11 +1829,16 @@ export default function Dashboard({
   };
   const mobileTitle =
     tab === "profile"
-      ? selectedPerson.name
+      ? "Patient Profile"
       : (TAB_TITLES[tab] ?? tab.charAt(0).toUpperCase() + tab.slice(1));
 
   return (
-    <div className={forceDesktop ? "app-shell force-desktop" : "app-shell"}>
+    <div
+      className={
+        (forceDesktop ? "app-shell force-desktop" : "app-shell") +
+        (mobileMenuOpen ? " menu-open" : "")
+      }
+    >
       <header className="app-header">
         <div className="header-left">
           <Mark size={40} />
@@ -1746,7 +1935,10 @@ export default function Dashboard({
             className="mobile-topbar-add"
             aria-label="Add Patient"
             title="Add Patient"
-            onClick={() => setTab("add")}
+            onClick={() => {
+              setForceDesktop(false);
+              setTab("add");
+            }}
           >
             <Plus size={20} />
           </button>
@@ -1959,65 +2151,69 @@ export default function Dashboard({
             </div>
           )}
           {tab === "dashboard" && (
-            <section>
+            <section className="overview-screen">
               <h1>Dashboard</h1>
-              <div className="stat-grid">
-                <div className="stat-card">
-                  <Users size={20} className="stat-icon" />
-                  <p className="stat-value">{analytics.peopleUnderCare}</p>
-                  <p className="stat-label">People under care (demo)</p>
+              <div className="overview-cards">
+                <div
+                  className={`stat-card clock-card season-${seasonOf(now)} daypart-${daypartOf(now)}${daypartOf(now) === "night" ? " is-night" : ""}`}
+                >
+                  <div className="clock-when">
+                    <p className="clock-time">
+                      {now.toLocaleTimeString([], {
+                        hour: "numeric",
+                        minute: "2-digit",
+                      })}
+                    </p>
+                    <p className="clock-date">
+                      {now.toLocaleDateString([], {
+                        weekday: "long",
+                        month: "long",
+                        day: "numeric",
+                        year: "numeric",
+                      })}
+                    </p>
+                  </div>
+                  <div className="clock-weather">
+                    {weatherIcon}
+                    <span>
+                      {weather ? weather.label : "Weather unavailable"}
+                    </span>
+                  </div>
                 </div>
-                <div className="stat-card">
-                  <HeartPulse size={20} className="stat-icon" />
-                  <p className="stat-value">
-                    {analytics.green} / {analytics.yellow} / {analytics.red}
-                  </p>
-                  <p className="stat-label">Green / yellow / red (demo)</p>
-                </div>
-                <div className="stat-card">
-                  <Siren size={20} className="stat-icon" />
-                  <p className="stat-value">{analytics.openTickets}</p>
-                  <p className="stat-label">Open triage tickets (demo)</p>
-                </div>
-                <div className="stat-card">
-                  <FlagIcon size={20} className="stat-icon" />
-                  <p className="stat-value">{openFlags.length}</p>
-                  <p className="stat-label">Flags awaiting review (demo)</p>
-                </div>
-                <div className="stat-card">
+                <div className={`stat-card appt-card ${apptBand}`}>
                   <CalendarCheck size={20} className="stat-icon" />
-                  <p className="stat-value">{daySchedule.length}</p>
-                  <p className="stat-label">Today's visits (demo)</p>
+                  <p className="stat-value">
+                    {todayApptCount ?? "—"}
+                  </p>
+                  <p className="stat-label">Appointments today</p>
+                </div>
+                <div className="stat-card total-card">
+                  <Users size={20} className="stat-icon" />
+                  <p className="stat-value">{people.length}</p>
+                  <p className="stat-label">Total patients</p>
                 </div>
               </div>
-              <div className="people-layout single">
-                <div className="overview-panel">
-                  <h2>Urgent triage</h2>
-                  <div className="card-list">
-                    {urgentTickets.map((t) => (
-                      <article
-                        key={t.id}
-                        className={`card priority-${t.priority}`}
-                      >
-                        <div className="card-top">
-                          <span className="priority-badge">{t.priority}</span>
-                          <strong>{t.title}</strong>
-                          <span className="card-meta">
-                            {t.person} · opened {t.opened}
-                          </span>
-                        </div>
-                        <p>{t.detail}</p>
-                      </article>
-                    ))}
+              <div className="overview-panels">
+                {apiStatus === "connected" ? (
+                  <TasksPanel
+                    variant="overview"
+                    user={user}
+                    visible={tab === "dashboard"}
+                    people={people}
+                    onOpenPatient={openPatientById}
+                  />
+                ) : (
+                  <div className="overview-panel">
+                    <h2>My reminders</h2>
+                    <p className="section-note">
+                      Reminders need the patient API connection.
+                    </p>
                   </div>
-                  <button
-                    className="btn btn-secondary"
-                    type="button"
-                    onClick={() => setTab("triage")}
-                  >
-                    View all triage
-                  </button>
-                </div>
+                )}
+                <NewsCard
+                  user={user}
+                  apiConnected={apiStatus === "connected"}
+                />
               </div>
             </section>
           )}
@@ -2321,7 +2517,7 @@ export default function Dashboard({
                               {telHref(num) ? (
                                 <a
                                   className="address-link"
-                                  href={telHref(num) ?? "#"}
+                                  href={callingHref(num) ?? "#"}
                                   title="Call this number"
                                 >
                                   {formatUSPhone(num)}
@@ -2483,6 +2679,15 @@ export default function Dashboard({
             // the Dashboard overview.
             <section className="people-layout single">
               <div className="patient-list-panel">
+                {apiStatus === "connected" && (
+                  <MergeReview
+                    user={user}
+                    visible={tab === "list"}
+                    isManager={isManager}
+                    onMerged={handleMerged}
+                    onOpenPatient={openPatientById}
+                  />
+                )}
                 {/* Mobile floating search (Jake, 2026-11-02):
                     translucent, fixed under the title row, with
                     the funnel status filter at its right end.
@@ -2614,6 +2819,7 @@ export default function Dashboard({
                     "{query}".
                   </p>
                 )}
+                <div className="patients-table-scroll">
                 <table className="patients-table">
                   <thead>
                     <tr>
@@ -2664,7 +2870,7 @@ export default function Dashboard({
                       const mainPhone = telHref(p.phoneHome)
                         ? p.phoneHome
                         : p.phoneCell;
-                      const callHref = telHref(mainPhone);
+                      const callHref = callingHref(mainPhone);
                       return (
                         <tr
                           key={p.id}
@@ -2721,6 +2927,7 @@ export default function Dashboard({
                     })}
                   </tbody>
                 </table>
+                </div>
                 {/* Mobile patient cards (Jake, 2026-11-02): zone
                     dot + name (+ status word when not active) +
                     directions/call buttons; NO address on the
@@ -2731,7 +2938,7 @@ export default function Dashboard({
                     const mainPhone = telHref(p.phoneHome)
                       ? p.phoneHome
                       : p.phoneCell;
-                    const callHref = telHref(mainPhone);
+                    const callHref = callingHref(mainPhone);
                     const lifecycle = p.patientStatus ?? "active";
                     return (
                       <div
@@ -2809,6 +3016,37 @@ export default function Dashboard({
                   List tab (row click → profile). The heading
                   stays — it reads cleanly above the card. */}
               <h1 className="profile-heading">Patient Profile</h1>
+              {/* Mobile-only position + steppers (the heading is
+                  hidden on phones; this row shows there instead). */}
+              {(() => {
+                const idx = mobilePeople.findIndex(
+                  (p) => p.id === selectedId,
+                );
+                if (idx < 0) return null;
+                return (
+                  <div className="profile-position">
+                    <button
+                      type="button"
+                      aria-label="Previous patient"
+                      disabled={idx <= 0}
+                      onClick={() => swipeProfile("prev")}
+                    >
+                      ‹
+                    </button>
+                    <span>
+                      {idx + 1} of {mobilePeople.length}
+                    </span>
+                    <button
+                      type="button"
+                      aria-label="Next patient"
+                      disabled={idx >= mobilePeople.length - 1}
+                      onClick={() => swipeProfile("next")}
+                    >
+                      ›
+                    </button>
+                  </div>
+                );
+              })()}
               {/* Mobile vertical action pill (Jake, 2026-11-02):
                   floating on the right edge, icons only — Call,
                   Directions, Edit. Phone widths only (styles.css);
@@ -2817,7 +3055,7 @@ export default function Dashboard({
                 const mainPhone = telHref(selectedPerson.phoneHome)
                   ? selectedPerson.phoneHome
                   : selectedPerson.phoneCell;
-                const callHref = telHref(mainPhone);
+                const callHref = callingHref(mainPhone);
                 const directionsUrl = mapsDirectionsUrl(selectedPerson);
                 return (
                   <div className="profile-vpill">
@@ -2857,7 +3095,32 @@ export default function Dashboard({
                   </div>
                 );
               })()}
-              <article className="profile-card">
+              <article
+                key={selectedPerson.id}
+                className={
+                  "profile-card" +
+                  (swipeDir ? ` swipe-${swipeDir}` : "")
+                }
+                onTouchStart={(e) => {
+                  profileTouchRef.current = {
+                    x: e.touches[0].clientX,
+                    y: e.touches[0].clientY,
+                  };
+                }}
+                onTouchEnd={(e) => {
+                  const start = profileTouchRef.current;
+                  profileTouchRef.current = null;
+                  if (!start) return;
+                  const dx = e.changedTouches[0].clientX - start.x;
+                  const dy = e.changedTouches[0].clientY - start.y;
+                  if (
+                    Math.abs(dx) > 56 &&
+                    Math.abs(dx) > 1.6 * Math.abs(dy)
+                  ) {
+                    swipeProfile(dx < 0 ? "next" : "prev");
+                  }
+                }}
+              >
                 <div
                   className="profile-head tappable"
                   role="button"
@@ -3099,7 +3362,7 @@ export default function Dashboard({
                       />
                     </label>
                     <div className="form-field">
-                      <span>Agency (optional)</span>
+                      <span>Agency</span>
                       <AgencyPicker
                         user={user}
                         apiConnected={apiStatus === "connected"}
@@ -3146,12 +3409,60 @@ export default function Dashboard({
                 )}
                 {!editing && (
                   <>
-                <h3>Manage list</h3>
-                <p className="section-note">
-                  Patients on hold or discharged leave the active
-                  list — the record itself stays on file. Deleting a
-                  record outright is a manager action.
-                </p>
+                <h3>Contact</h3>
+                <div className="profile-details">
+                  <div>
+                    <span>Address</span>
+                    <strong>
+                      {mapsDirectionsUrl(selectedPerson) ? (
+                        <a
+                          className="address-link"
+                          href={mapsDirectionsUrl(selectedPerson) ?? "#"}
+                          target="_blank"
+                          rel="noreferrer"
+                          title="Open in Google Maps for directions"
+                        >
+                          {fullAddressText(selectedPerson)}
+                        </a>
+                      ) : (
+                        "—"
+                      )}
+                    </strong>
+                  </div>
+                  <div>
+                    <span>Home phone</span>
+                    <strong>
+                      {telHref(selectedPerson.phoneHome) ? (
+                        <a
+                          className="address-link"
+                          href={callingHref(selectedPerson.phoneHome) ?? "#"}
+                          title="Call this number"
+                        >
+                          {formatUSPhone(selectedPerson.phoneHome ?? "")}
+                        </a>
+                      ) : (
+                        "—"
+                      )}
+                    </strong>
+                  </div>
+                  <div>
+                    <span>Cell phone</span>
+                    <strong>
+                      {telHref(selectedPerson.phoneCell) ? (
+                        <a
+                          className="address-link"
+                          href={callingHref(selectedPerson.phoneCell) ?? "#"}
+                          title="Call this number"
+                        >
+                          {formatUSPhone(selectedPerson.phoneCell ?? "")}
+                        </a>
+                      ) : (
+                        "—"
+                      )}
+                    </strong>
+                  </div>
+                </div>
+                
                 <div className="profile-actions">
                   {(selectedPerson.patientStatus ?? "active") !==
                     "hold" && (
@@ -3190,59 +3501,80 @@ export default function Dashboard({
                   )}
                 </div>
                 {statusError && <p className="pin-error">{statusError}</p>}
-                <h3>Contact</h3>
-                <div className="profile-details">
-                  <div>
-                    <span>Address</span>
-                    <strong>
-                      {mapsDirectionsUrl(selectedPerson) ? (
-                        <a
-                          className="address-link"
-                          href={mapsDirectionsUrl(selectedPerson) ?? "#"}
-                          target="_blank"
-                          rel="noreferrer"
-                          title="Open in Google Maps for directions"
+                {apiStatus === "connected" && (
+                  <div className="dup-mark">
+                    {!dupPickerOpen ? (
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={() => {
+                          setDupPickerOpen(true);
+                          setDupNote("");
+                        }}
+                      >
+                        Mark as duplicate…
+                      </button>
+                    ) : (
+                      <div className="dup-picker">
+                        <input
+                          type="search"
+                          value={dupQuery}
+                          onChange={(e) => setDupQuery(e.target.value)}
+                          placeholder="Search for the other record…"
+                          aria-label="Search for the other record"
+                        />
+                        <div className="dup-results">
+                          {people
+                            .filter(
+                              (p) =>
+                                p.id !== selectedPerson.id &&
+                                p.name
+                                  .toLowerCase()
+                                  .includes(dupQuery.trim().toLowerCase()),
+                            )
+                            .slice(0, 8)
+                            .map((p) => (
+                              <button
+                                key={p.id}
+                                type="button"
+                                className="dup-result"
+                                disabled={dupBusy}
+                                onClick={() =>
+                                  void handleMarkDuplicate(p.id, p.name)
+                                }
+                              >
+                                <span>{p.name}</span>
+                                <span className="dup-result-sub">
+                                  {[p.dateOfBirth, p.city, p.state]
+                                    .filter(Boolean)
+                                    .join(" · ")}
+                                </span>
+                              </button>
+                            ))}
+                          {people.filter(
+                            (p) =>
+                              p.id !== selectedPerson.id &&
+                              p.name
+                                .toLowerCase()
+                                .includes(dupQuery.trim().toLowerCase()),
+                          ).length === 0 && (
+                            <p className="section-note">
+                              No other patient matches.
+                            </p>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          onClick={() => setDupPickerOpen(false)}
                         >
-                          {fullAddressText(selectedPerson)}
-                        </a>
-                      ) : (
-                        "—"
-                      )}
-                    </strong>
+                          Cancel
+                        </button>
+                      </div>
+                    )}
+                    {dupNote && <p className="section-note">{dupNote}</p>}
                   </div>
-                  <div>
-                    <span>Home phone</span>
-                    <strong>
-                      {telHref(selectedPerson.phoneHome) ? (
-                        <a
-                          className="address-link"
-                          href={telHref(selectedPerson.phoneHome) ?? "#"}
-                          title="Call this number"
-                        >
-                          {formatUSPhone(selectedPerson.phoneHome ?? "")}
-                        </a>
-                      ) : (
-                        "—"
-                      )}
-                    </strong>
-                  </div>
-                  <div>
-                    <span>Cell phone</span>
-                    <strong>
-                      {telHref(selectedPerson.phoneCell) ? (
-                        <a
-                          className="address-link"
-                          href={telHref(selectedPerson.phoneCell) ?? "#"}
-                          title="Call this number"
-                        >
-                          {formatUSPhone(selectedPerson.phoneCell ?? "")}
-                        </a>
-                      ) : (
-                        "—"
-                      )}
-                    </strong>
-                  </div>
-                </div>
+                )}
                 <h3>Appointments</h3>
                 {selectedDay.length === 0 &&
                   selectedReminders.length === 0 && (
@@ -3278,6 +3610,14 @@ export default function Dashboard({
                 />
               )}
               {apiStatus === "connected" && (
+                <TasksPanel
+                  key={`tasks-${selectedPerson.id}`}
+                  variant="patient"
+                  user={user}
+                  patientId={selectedPerson.id}
+                />
+              )}
+              {apiStatus === "connected" && (
                 <ClinicalDocuments
                   user={user}
                   patientApiId={selectedPerson.id}
@@ -3293,19 +3633,19 @@ export default function Dashboard({
                 <button
                   className="btn btn-secondary"
                   type="button"
-                  onClick={() => setShowPatientImport((v) => !v)}
+                  onClick={() => setShowPhotoIntake((v) => !v)}
                 >
-                  Import from Google Contacts
+                  Add by photo
                 </button>
               </div>
-              {showPatientImport && (
-                <GoogleContactPicker
-                  mode="single"
-                  onPick={(picked) => {
-                    if (picked[0]) applyContactToPatientForm(picked[0]);
-                    setShowPatientImport(false);
+              {showPhotoIntake && (
+                <PhotoIntake
+                  onApply={(candidate, referrer) => {
+                    applyContactToPatientForm(candidate);
+                    if (referrer) setFormReferrer(referrer);
+                    setShowPhotoIntake(false);
                   }}
-                  onClose={() => setShowPatientImport(false)}
+                  onClose={() => setShowPhotoIntake(false)}
                 />
               )}
               <form className="add-form" onSubmit={handleAddPatient}>
@@ -3321,7 +3661,7 @@ export default function Dashboard({
                     value={formFname}
                     onChange={(e) => setFormFname(e.target.value)}
                     required
-                    placeholder="e.g. Jordan"
+                    placeholder="e.g. Jake"
                   />
                 </label>
                 <label>
@@ -3337,7 +3677,7 @@ export default function Dashboard({
                     value={formLname}
                     onChange={(e) => setFormLname(e.target.value)}
                     required
-                    placeholder="e.g. Perez"
+                    placeholder="e.g. Marc"
                   />
                 </label>
                 {(dupChecking || dupMatches.length > 0) && (
@@ -3381,7 +3721,7 @@ export default function Dashboard({
                   />
                 </label>
                 <label>
-                  Age (if birth date unknown)
+                  Age
                   <input
                     type="number"
                     min={0}
@@ -3488,17 +3828,8 @@ export default function Dashboard({
                     <option value="discharged">Discharged</option>
                   </select>
                 </label>
-                <label>
-                  Note
-                  <textarea
-                    rows={3}
-                    value={formNote}
-                    onChange={(e) => setFormNote(e.target.value)}
-                    placeholder="e.g. On track — recent check-in normal"
-                  />
-                </label>
                 <div className="form-field">
-                  <span>Agency (optional)</span>
+                  <span>Agency</span>
                   <AgencyPicker
                     user={user}
                     apiConnected={apiStatus === "connected"}
@@ -3512,6 +3843,15 @@ export default function Dashboard({
                     resetKey="add-patient"
                   />
                 </div>
+                <label>
+                  Note
+                  <textarea
+                    rows={3}
+                    value={formNote}
+                    onChange={(e) => setFormNote(e.target.value)}
+                    placeholder="e.g. On track — recent check-in normal"
+                  />
+                </label>
                 <button className="btn btn-primary" type="submit">
                   Add patient
                 </button>
@@ -3713,7 +4053,7 @@ export default function Dashboard({
                                       {telHref(num) ? (
                                         <a
                                           className="address-link"
-                                          href={telHref(num) ?? "#"}
+                                          href={callingHref(num) ?? "#"}
                                           title="Call this number"
                                         >
                                           {formatUSPhone(num)}
@@ -3836,6 +4176,8 @@ export default function Dashboard({
                     </button>
                   </div>
                 </article>
+                <CallingAppSettings />
+                <NewsTopicsSettings />
                 <VisitCategoriesSettings
                   user={user}
                   apiConnected={apiStatus === "connected"}

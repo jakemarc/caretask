@@ -21,6 +21,72 @@ export function telHref(phone: string | null | undefined): string | null {
   return `tel:${digits}`;
 }
 
+// ── Calling app choice (Jake, 2026-11-02) ──────────────────────
+// Settings → Calling app: which app Call buttons hand the number
+// to. Only apps with a real web handoff qualify (his rule):
+// - phone: tel: — the device dialer, number ready.
+// - googlevoice: voice.google.com opens with the number in the
+//   dialer (the Voice app via universal link when installed).
+// - whatsapp: wa.me opens the chat for the number (the call
+//   button inside WhatsApp is one more tap; the patient needs
+//   WhatsApp).
+// - facetime: facetime-audio: hands the number to FaceTime
+//   (Apple devices).
+// Doximity Dialer is deliberately NOT offered: its prefill
+// handoff exists only for native-app integrations (Epic
+// Haiku/Canto, its Android library) — no web link hands it a
+// number, and Dialer eligibility (MD/NP/PA/pharmacist) does not
+// include PTs. The choice is remembered on this device
+// (localStorage, like the theme) and never asked per tap.
+export type CallingApp = "phone" | "googlevoice" | "whatsapp" | "facetime";
+
+const CALLING_APP_KEY = "caretask-calling-app";
+
+export function getCallingApp(): CallingApp {
+  try {
+    const v = localStorage.getItem(CALLING_APP_KEY);
+    if (
+      v === "googlevoice" ||
+      v === "whatsapp" ||
+      v === "facetime" ||
+      v === "phone"
+    )
+      return v;
+  } catch {
+    // Private-mode storage failures just fall back to Phone.
+  }
+  return "phone";
+}
+
+export function setCallingApp(v: CallingApp): void {
+  try {
+    localStorage.setItem(CALLING_APP_KEY, v);
+  } catch {
+    // Non-fatal: the choice just won't persist on this device.
+  }
+}
+
+// The href a Call button should use for this number, honoring
+// the saved calling app. Null when the number isn't dialable.
+export function callingHref(
+  phone: string | null | undefined,
+): string | null {
+  const tel = telHref(phone);
+  if (!tel) return null;
+  const e164 = tel.slice("tel:".length);
+  const digits = e164.replace(/\D/g, "");
+  switch (getCallingApp()) {
+    case "googlevoice":
+      return `https://voice.google.com/calls?a=nc,%2B${digits}`;
+    case "whatsapp":
+      return `https://wa.me/${digits}`;
+    case "facetime":
+      return `facetime-audio://${e164.startsWith("+") ? e164 : `+${digits}`}`;
+    default:
+      return tel;
+  }
+}
+
 export function formatUSPhone(raw: string): string {
   if (!raw) return "";
   let digits = raw.replace(/\D/g, "");

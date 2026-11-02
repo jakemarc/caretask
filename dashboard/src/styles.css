@@ -666,6 +666,227 @@ input {
   font-size: 14px;
 }
 
+/* ---------- Dashboard overview (Jake, 2026-11-02) ----------
+   Three cards only: (1) a live clock with a weather icon whose
+   background follows the season and the time of day, (2) today's
+   appointment count on a workload color band (1–3 green, 4
+   yellow, 5–7 red, 8+ deep red, 0 = plain), (3) total patients.
+   Below: My reminders + the news card. On desktop widths the
+   overview fits ONE screen — the section takes the leftover
+   viewport height, panels flex to fill it, and lists trim
+   inside their panel instead of scrolling the page. */
+.overview-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.overview-cards {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+}
+@media (min-width: 721px) {
+  .overview-cards {
+    grid-template-columns: 2fr 1fr 1fr;
+  }
+}
+.overview-panels {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+}
+@media (min-width: 1001px) {
+  .overview-panels {
+    grid-template-columns: 1fr 1.25fr;
+  }
+  .overview-screen {
+    height: calc(100dvh - 172px);
+    min-height: 470px;
+  }
+  .overview-screen > h1,
+  .overview-cards {
+    flex: none;
+  }
+  .overview-panels {
+    flex: 1;
+    min-height: 0;
+  }
+}
+.overview-panels > * {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px;
+  min-height: 0;
+}
+.overview-panels .tasks-panel {
+  display: flex;
+  flex-direction: column;
+}
+.overview-panels .tasks-panel .task-list {
+  overflow-y: auto;
+  min-height: 0;
+}
+
+/* Card one — clock + weather. The gradient comes from the
+   season (rows) and the daypart (columns); night flips the
+   text light. Zone/status colors are never themed — these
+   are decorative sky tones only. */
+.clock-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  color: #20332c;
+}
+.clock-when {
+  flex: 1;
+  min-width: 0;
+}
+.clock-time {
+  margin: 0;
+  font-size: 34px;
+  font-weight: 800;
+  line-height: 1.05;
+}
+.clock-date {
+  margin: 3px 0 0;
+  font-size: 14.5px;
+  font-weight: 600;
+  opacity: 0.75;
+}
+.clock-weather {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  min-width: 76px;
+  font-size: 12px;
+  font-weight: 650;
+}
+.clock-card.season-spring.daypart-dawn { background: linear-gradient(135deg, #fdf3d8, #e6f4dc); }
+.clock-card.season-spring.daypart-morning { background: linear-gradient(135deg, #eafaf0, #fdf6d8); }
+.clock-card.season-spring.daypart-midday { background: linear-gradient(135deg, #e2f6ff, #eafaf0); }
+.clock-card.season-spring.daypart-afternoon { background: linear-gradient(135deg, #eafaf0, #fdeeda); }
+.clock-card.season-spring.daypart-golden { background: linear-gradient(135deg, #fdeeda, #f6d9b8); }
+.clock-card.season-spring.daypart-dusk { background: linear-gradient(135deg, #f3d9c8, #cdb4d6); }
+.clock-card.season-summer.daypart-dawn { background: linear-gradient(135deg, #ffe9c9, #e8f7ee); }
+.clock-card.season-summer.daypart-morning { background: linear-gradient(135deg, #dff3ff, #fff3c4); }
+.clock-card.season-summer.daypart-midday { background: linear-gradient(135deg, #cdeeff, #fff0bd); }
+.clock-card.season-summer.daypart-afternoon { background: linear-gradient(135deg, #dff3ff, #ffe3ae); }
+.clock-card.season-summer.daypart-golden { background: linear-gradient(135deg, #ffe3c2, #ffb98a); }
+.clock-card.season-summer.daypart-dusk { background: linear-gradient(135deg, #f2b183, #a98bc2); }
+.clock-card.season-fall.daypart-dawn { background: linear-gradient(135deg, #fbe3c5, #e9e4d2); }
+.clock-card.season-fall.daypart-morning { background: linear-gradient(135deg, #fdeeda, #f3e3c2); }
+.clock-card.season-fall.daypart-midday { background: linear-gradient(135deg, #fdeeda, #f8dfae); }
+.clock-card.season-fall.daypart-afternoon { background: linear-gradient(135deg, #fdeeda, #f6cf9c); }
+.clock-card.season-fall.daypart-golden { background: linear-gradient(135deg, #f9d9ae, #e8975a); }
+.clock-card.season-fall.daypart-dusk { background: linear-gradient(135deg, #e8a87c, #8d6e9e); }
+.clock-card.season-winter.daypart-dawn { background: linear-gradient(135deg, #f3e3d3, #e7edf7); }
+.clock-card.season-winter.daypart-morning { background: linear-gradient(135deg, #e7edf7, #f7fafc); }
+.clock-card.season-winter.daypart-midday { background: linear-gradient(135deg, #dde8f5, #f4f8fb); }
+.clock-card.season-winter.daypart-afternoon { background: linear-gradient(135deg, #e7edf7, #fdeeda); }
+.clock-card.season-winter.daypart-golden { background: linear-gradient(135deg, #f6cf9c, #b6c4de); }
+.clock-card.season-winter.daypart-dusk { background: linear-gradient(135deg, #c4a29a, #5f7396); }
+.clock-card.daypart-night {
+  background: linear-gradient(135deg, #1d2a4d, #35507e);
+  border-color: #35507e;
+  color: #eef2ff;
+}
+.clock-card.daypart-night .clock-date {
+  color: #c3cee8;
+  opacity: 1;
+}
+
+/* Card two — workload bands (decorative fills; the count and
+   label stay in the normal text colors for readability, deep
+   red flips to white text). */
+.appt-card.band-green { background: linear-gradient(135deg, #e4f6e8, #cdeeda); border-color: #a9d8b4; }
+.appt-card.band-yellow { background: linear-gradient(135deg, #fef6d8, #fde68a); border-color: #ecd27a; }
+.appt-card.band-red { background: linear-gradient(135deg, #fde3e3, #fecaca); border-color: #f0a3a3; }
+.appt-card.band-deepred { background: linear-gradient(135deg, #f87171, #dc2626); border-color: #dc2626; color: #fff; }
+.appt-card.band-deepred .stat-value { color: #fff; }
+.appt-card.band-deepred .stat-label { color: #ffe4e4; }
+
+/* News card */
+.news-card {
+  display: flex;
+  flex-direction: column;
+}
+.news-topics-line {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--muted);
+}
+.news-list {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+.news-list.expanded {
+  overflow-y: auto;
+}
+.news-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  text-decoration: none;
+  color: var(--text);
+}
+.news-item:last-child {
+  border-bottom: none;
+}
+.news-title {
+  font-size: 14.5px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+.news-item:hover .news-title {
+  color: var(--teal);
+}
+.news-desc {
+  font-size: 12.5px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+.news-meta {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.news-more {
+  margin-top: auto;
+  padding-top: 8px;
+  background: none;
+  border: none;
+  text-align: left;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--teal);
+  cursor: pointer;
+}
+.news-topic-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+.news-topic-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 14.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.news-topic-row input {
+  width: 17px;
+  height: 17px;
+  accent-color: var(--teal);
+}
+
 .chart-card {
   background: var(--panel);
   border: 1px solid var(--border);
@@ -1940,6 +2161,67 @@ label.contact-picker-row {
   font-size: 0.7rem;
   color: var(--muted);
   padding-left: 4px;
+}
+.cal-cell-chips {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+/* Mobile month markers (Jake, 2026-11-02): on phones the month
+   grid shows NO names — one colored bar per appointment, in the
+   visit type's color; the tapped day's list below the grid
+   carries the names. Desktop keeps the named chips. */
+.cal-month-markers {
+  display: none;
+}
+.cal-legend {
+  display: none;
+}
+@media (max-width: 720px) {
+  .app-shell:not(.force-desktop) .cal-cell-chips {
+    display: none;
+  }
+  .app-shell:not(.force-desktop) .cal-month-markers {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    margin-top: 2px;
+  }
+  .app-shell:not(.force-desktop) .cal-marker {
+    height: 5px;
+    border-radius: 999px;
+    display: block;
+  }
+  .app-shell:not(.force-desktop) .cal-marker-more {
+    font-size: 0.62rem;
+    font-weight: 700;
+    color: var(--muted);
+    line-height: 1.1;
+  }
+  .app-shell:not(.force-desktop) .cal-cell {
+    min-height: 58px;
+  }
+  .app-shell:not(.force-desktop) .cal-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+    margin-top: 10px;
+  }
+  .app-shell:not(.force-desktop) .cal-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--muted);
+  }
+  .app-shell:not(.force-desktop) .cal-legend-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    display: inline-block;
+  }
 }
 .cal-daylist {
   margin-top: 16px;
@@ -3860,4 +4142,549 @@ label.contact-picker-row {
     width: 100%;
     padding: 12px;
   }
+}
+
+/* ── Patient merge (duplicates) — Patients-tab review card +
+   profile mark picker (2026-11-02) ───────────────────────────── */
+.merge-card {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel);
+  padding: 16px 18px;
+  margin-bottom: 16px;
+}
+.merge-title {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+.merge-pair {
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+  margin-top: 14px;
+}
+.merge-panels {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+@media (max-width: 720px) {
+  .merge-panels {
+    grid-template-columns: 1fr;
+  }
+}
+.merge-panel {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: var(--panel2, transparent);
+}
+.merge-panel.kept {
+  border-color: var(--teal);
+  box-shadow: 0 0 0 1px var(--teal);
+}
+.merge-panel-name {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--teal);
+  cursor: pointer;
+  text-align: left;
+}
+.merge-facts {
+  margin: 10px 0;
+  display: grid;
+  gap: 5px;
+}
+.merge-facts > div {
+  display: grid;
+  grid-template-columns: 86px 1fr;
+  gap: 8px;
+  font-size: 13.5px;
+}
+.merge-facts dt {
+  color: var(--muted);
+  font-weight: 600;
+}
+.merge-facts dd {
+  margin: 0;
+  font-weight: 550;
+  overflow-wrap: anywhere;
+}
+.merge-keep {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 650;
+  font-size: 14px;
+  cursor: pointer;
+  margin-top: 6px;
+}
+.merge-keep input {
+  width: 17px;
+  height: 17px;
+  accent-color: var(--teal);
+}
+.merge-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+.merge-role-note {
+  font-size: 13px;
+  color: var(--muted);
+}
+.merge-history {
+  border-top: 1px solid var(--border);
+  margin-top: 16px;
+  padding-top: 12px;
+}
+.merge-history h4 {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.merge-history-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 0;
+  font-size: 14px;
+}
+.dup-mark {
+  margin-top: 14px;
+}
+.dup-picker {
+  display: grid;
+  gap: 10px;
+  max-width: 460px;
+}
+.dup-picker input[type="search"] {
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 10px 12px;
+  font-size: 14.5px;
+  background: var(--panel);
+  color: var(--text);
+  width: 100%;
+}
+.dup-results {
+  display: grid;
+  gap: 6px;
+}
+.dup-result {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  border-radius: 9px;
+  padding: 9px 12px;
+  font: inherit;
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+.dup-result:hover {
+  border-color: var(--teal);
+}
+.dup-result-sub {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+/* ── Clinician tasks / reminders (2026-11-02) ─────────────────── */
+.task-strip {
+  display: flex;
+  gap: 14px;
+  font-size: 13.5px;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+.task-strip-overdue {
+  color: var(--red);
+}
+.task-list {
+  display: grid;
+  gap: 2px;
+}
+.task-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 6px;
+  border-radius: 8px;
+  font-size: 14.5px;
+}
+.task-row:hover {
+  background: var(--panel2, rgba(100, 116, 139, 0.08));
+}
+.task-row input[type="checkbox"] {
+  width: 17px;
+  height: 17px;
+  accent-color: var(--teal);
+  flex: none;
+}
+.task-title {
+  font-weight: 550;
+  overflow-wrap: anywhere;
+}
+.task-row.done .task-title {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+.task-patient-chip {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--teal);
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 12.5px;
+  font-weight: 650;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.task-due {
+  margin-left: auto;
+  font-size: 12.5px;
+  font-weight: 650;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.task-due.overdue {
+  color: var(--red);
+}
+.task-due.today {
+  color: var(--amber, #d97706);
+}
+.task-del {
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 5px;
+  flex: none;
+}
+.task-add {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+.task-add input[type="text"] {
+  flex: 1 1 200px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 9px 12px;
+  font-size: 14.5px;
+  background: var(--panel);
+  color: var(--text);
+}
+.task-add input[type="date"],
+.task-add select {
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 9px 10px;
+  font-size: 14px;
+  background: var(--panel);
+  color: var(--text);
+}
+.task-done {
+  margin-top: 10px;
+}
+.task-done-toggle {
+  border: none;
+  background: none;
+  color: var(--teal);
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+  padding: 4px 0;
+}
+.tasks-block {
+  margin-top: 16px;
+}
+
+/* ── CSV import: batch agency/status + per-row selects (2026-11-02) */
+.csv-batch {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  flex-wrap: wrap;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin: 10px 0;
+}
+.csv-batch-label {
+  font-size: 13px;
+  font-weight: 700;
+  padding-top: 9px;
+}
+.csv-batch-agency {
+  flex: 1 1 260px;
+  min-width: 220px;
+}
+.csv-batch-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  padding-top: 4px;
+}
+.csv-batch-status select,
+.csv-row-select {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 9px;
+  font-size: 13.5px;
+  background: var(--panel);
+  color: var(--text);
+  max-width: 210px;
+}
+
+/* ── Calendar agency filter + badges (2026-11-02) ─────────────── */
+.cal-agency-filter {
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 8px 10px;
+  font-size: 14px;
+  background: var(--panel);
+  color: var(--text);
+  max-width: 210px;
+}
+.cal-chip-agency {
+  opacity: 0.72;
+}
+
+/* ── Muse-style reveal menu + profile cleanup (2026-11-02) ──────
+   The menu lives UNDER the page: the sidebar rests in place at
+   the left, and opening the menu slides the PAGE (body, top bar,
+   fabs, pill) right to reveal it. The old overlay drawer rules
+   above are overridden here at phone widths; force-desktop opts
+   out via :not(.force-desktop). */
+@media (max-width: 720px) {
+  .app-shell:not(.force-desktop) .sidebar {
+    display: flex;
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: min(320px, 85vw);
+    max-width: none;
+    z-index: 30;
+    flex-direction: column;
+    align-items: stretch;
+    overflow-y: auto;
+    background: var(--panel);
+    border-right: 1px solid var(--border);
+    box-shadow: none;
+    padding: 16px 12px;
+    visibility: hidden;
+    transition: visibility 0s linear 0.34s;
+  }
+
+  .app-shell:not(.force-desktop).menu-open .sidebar {
+    visibility: visible;
+    transition-delay: 0s;
+  }
+
+  .app-shell:not(.force-desktop) .sidebar .sidebar-nav {
+    flex: none;
+    flex-wrap: wrap;
+  }
+
+  .app-shell:not(.force-desktop) .sidebar .nav-btn {
+    flex: none;
+    width: 100%;
+    justify-content: flex-start;
+    padding: 13px 12px;
+    font-size: 16px;
+  }
+
+  .app-shell:not(.force-desktop) .sidebar .nav-label {
+    display: inline;
+  }
+
+  .app-shell:not(.force-desktop) .sidebar .sidebar-toggle {
+    display: none;
+  }
+
+  .app-shell:not(.force-desktop) .sidebar .drawer-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: auto;
+    border-top: 1px solid var(--border);
+    padding-top: 10px;
+  }
+
+  /* The page elements slide together. */
+  .app-shell:not(.force-desktop) .dashboard-body,
+  .app-shell:not(.force-desktop) .mobile-topbar,
+  .app-shell:not(.force-desktop) .mobile-pill,
+  .app-shell:not(.force-desktop) .mobile-fab {
+    transition: transform 0.34s cubic-bezier(0.32, 0.72, 0.24, 1);
+  }
+
+  .app-shell:not(.force-desktop).menu-open .dashboard-body,
+  .app-shell:not(.force-desktop).menu-open .mobile-topbar,
+  .app-shell:not(.force-desktop).menu-open .mobile-fab {
+    transform: translateX(min(320px, 85vw));
+  }
+
+  /* The pill is centered with translateX(-50%) — keep the
+     centering and add the slide on top of it. */
+  .app-shell:not(.force-desktop).menu-open .mobile-pill {
+    transform: translateX(calc(-50% + min(320px, 85vw)));
+  }
+
+  /* The scrim becomes a transparent tap-to-close veil over the
+     exposed page sliver only (it starts where the menu ends). */
+  .app-shell:not(.force-desktop) .mobile-scrim {
+    left: min(320px, 85vw);
+    right: 0;
+    width: auto;
+    background: transparent;
+    z-index: 65;
+    box-shadow: inset 28px 0 28px -28px rgba(10, 25, 22, 0.4);
+  }
+
+  /* Profile cleanup: the top bar carries the title on mobile —
+     the in-page heading above the card goes away. */
+  .app-main .profile-heading {
+    display: none;
+  }
+}
+
+/* ── Mobile profile swipe + position (2026-11-02) ─────────────── */
+.profile-position {
+  display: none;
+}
+@media (max-width: 720px) {
+  .profile-position {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    margin-bottom: 10px;
+    font-size: 13px;
+    font-weight: 650;
+    color: var(--muted);
+  }
+  .profile-position button {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--text);
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .profile-position button:disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
+  .profile-card.swipe-left {
+    animation: profileSwipeLeft 0.28s ease;
+  }
+  .profile-card.swipe-right {
+    animation: profileSwipeRight 0.28s ease;
+  }
+  @keyframes profileSwipeLeft {
+    from {
+      transform: translateX(46px);
+      opacity: 0.4;
+    }
+  }
+  @keyframes profileSwipeRight {
+    from {
+      transform: translateX(-46px);
+      opacity: 0.4;
+    }
+  }
+}
+
+/* ── Add-by-photo intake (2026-11-02) ──────────────────────────── */
+.photo-intake {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel);
+  padding: 16px 18px;
+  margin-bottom: 16px;
+}
+.photo-intake-preview {
+  display: block;
+  max-width: 320px;
+  max-height: 300px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  margin: 12px 0;
+  object-fit: contain;
+}
+.photo-intake-result {
+  margin-top: 6px;
+}
+.photo-intake-raw {
+  margin-top: 12px;
+  font-size: 13px;
+}
+.photo-intake-raw summary {
+  cursor: pointer;
+  color: var(--teal);
+  font-weight: 650;
+}
+.photo-intake-raw pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--panel2, rgba(100, 116, 139, 0.08));
+  border-radius: 8px;
+  padding: 10px 12px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+/* ── Patients list: desktop table scrolls within one screen
+   (Jake, 2026-11-02) ─────────────────────────────────────────── */
+@media (min-width: 721px) {
+  .patients-table-scroll {
+    max-height: calc(100dvh - 230px);
+    overflow-y: auto;
+  }
+  .patients-table-scroll thead th {
+    position: sticky;
+    top: 0;
+    background: var(--panel);
+    z-index: 2;
+    box-shadow: 0 1px 0 var(--border);
+  }
+}
+/* Desktop view forced on a phone gets the same one-screen table. */
+.app-shell.force-desktop .patients-table-scroll {
+  max-height: calc(100dvh - 230px);
+  overflow-y: auto;
+}
+.app-shell.force-desktop .patients-table-scroll thead th {
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+  z-index: 2;
+  box-shadow: 0 1px 0 var(--border);
 }

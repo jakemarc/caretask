@@ -10,12 +10,14 @@ Schemas (apply in this order): `patient-api/schema.sql`,
 `schema-documents.sql`, `schema-agencies.sql`,
 `schema-agencies-cms.sql`, `schema-patients-agency.sql`,
 `schema-patients-age.sql`, `schema-expense-reports.sql`,
-`schema-expenses.sql`.
+`schema-expenses.sql`, `schema-mileage-chains.sql`,
+`schema-patient-merge.sql`, `schema-tasks.sql`.
 
 Tables: `patients`, `users`, `appointment_categories`,
 `appointment_statuses`, `appointments`, `messages`, `documents`,
 `agencies`, `expense_reports`, `mileage_entries`, `expenses`,
-`audit_log`, `event_log`.
+`patient_merge_marks`, `patient_merges`, `clinician_tasks`,
+`audit_log`, `event_log` (16 in total).
 
 ## patients (v2 — 48 columns)
 
@@ -260,6 +262,25 @@ user ids, categories and negative amounts, the JOIN returns
 the right name even for two staff with identical names, and
 the expenses API suite passes end to end (42 checks incl.
 day math, lifecycle, PIN gates, cross-user isolation).
+
+## patient_merge_marks / patient_merges (deploy-28)
+
+Duplicate bookkeeping (`schema-patient-merge.sql`).
+`patient_merge_marks`: one open mark per unordered patient pair
+(normalized low/high UUID pair as the primary key); a mark
+closes by stamping `deleted_at` (there is no DELETE grant).
+`patient_merges`: survivor/loser ids, the acting manager,
+`moved_ids` JSONB holding the exact row ids re-pointed in
+appointments / documents / messages / mileage_entries (that
+record is what makes Undo exact), and `undone_at` / `undone_by`.
+
+## clinician_tasks (deploy-28)
+
+Per-clinician reminders (`schema-tasks.sql`): `user_id` owner
+(FK → users), `patient_id` (nullable FK → patients), `title`
+(≤300), `notes`, `due_at`, `done_at`, soft delete via
+`deleted_at`. Owner-scoped at the API — no other clinician can
+read or address a row.
 
 ## audit_log (patient change history)
 

@@ -35,6 +35,9 @@ const messagesRouter = require('./routes/messages');
 const documentsRouter = require('./routes/documents');
 const agenciesRouter = require('./routes/agencies');
 const expensesRouter = require('./routes/expenses');
+const patientMergeRouter = require('./routes/patientMerge');
+const tasksRouter = require('./routes/tasks');
+const newsRouter = require('./routes/news');
 
 // Fail fast at boot if the Firebase project is not configured: without it,
 // token verification cannot work, and silently rejecting everything would
@@ -82,6 +85,9 @@ app.use('/agencies', requireAuth, agenciesRouter);
 // Expense reports: the router carries its own path prefixes
 // (/expense-reports/*, /mileage/route) so it mounts at root.
 app.use('/', requireAuth, expensesRouter);
+app.use('/patient-merge', requireAuth, patientMergeRouter);
+app.use('/tasks', requireAuth, tasksRouter);
+app.use('/news', requireAuth, newsRouter);
 
 // Error handler: log the real error server-side, send a generic message.
 app.use((err, req, res, next) => {
