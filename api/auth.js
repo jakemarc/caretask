@@ -48,18 +48,21 @@ async function requireAuth(req, res, next) {
     const header = req.headers.authorization || '';
     const match = header.match(/^Bearer (.+)$/);
     if (!match) {
+      req.authFailure = { reason: 'missing_or_malformed_header' };
       return res.status(401).json({ error: 'missing or invalid Authorization header' });
     }
     const decoded = await getAdmin().auth().verifyIdToken(match[1]);
     const email = (decoded.email || '').toLowerCase();
     const allowed = allowedEmails();
     if (!allowed.includes(email)) {
+      req.authFailure = { reason: 'not_on_allowlist', email };
       return res.status(403).json({ error: 'account is not on the API allowlist' });
     }
     req.user = { uid: decoded.uid, email };
     next();
   } catch (err) {
-    console.error('auth failed:', err.message);
+    req.authFailure = { reason: 'token_verification_failed', code: err.code || 'unknown' };
+    console.error('auth failed:', err.code || '', err.message);
     return res.status(401).json({ error: 'invalid or expired token' });
   }
 }

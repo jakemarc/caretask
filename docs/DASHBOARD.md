@@ -228,6 +228,9 @@ restrictions, not by secrecy).
   fall back to the on-screen demo list and a banner says so; the
   Clinician tab falls back to a read-only derived view. Anything
   PIN-gated fails CLOSED (no verification possible → no edits).
+  Since deploy-20 (2026-11-02) the sign-in check retries once
+  after ~1.5s before this fallback verdict — a single failed
+  first attempt no longer brands the session.
 - **Manager PIN flow**: Edit/Delete patient and all staff writes ask
   for a PIN, verify it via `POST /users/verify-pin`, keep the
   verified PIN in component memory only (patient scope: per patient;

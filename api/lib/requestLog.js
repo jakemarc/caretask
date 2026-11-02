@@ -62,7 +62,12 @@ function requestLogger(pool) {
         actor,
         event: status === 401 || status === 403 ? 'auth_failure' : 'api_request',
         patientId,
-        details: { method: req.method, path, status },
+        details: {
+          method: req.method,
+          path,
+          status,
+          ...(req.authFailure ? { auth: req.authFailure } : {}),
+        },
         ip: req.ip || null,
       }).catch(() => {
         // Best-effort only: never fail a request over its log row.
