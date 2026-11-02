@@ -3,12 +3,12 @@ import type { User } from "firebase/auth";
 import { Search, StickyNote, XCircle } from "lucide-react";
 import {
   fetchAgencies,
-  isPinRejection,
+  isRoleRejection,
   updateAgency,
-  verifyManagerPin,
   type AgencyServiceKey,
   type ApiAgency,
 } from "../lib/patientApi";
+import { isManagerRole, useMyStaff } from "../lib/useMyRole";
 import { telHref } from "../lib/phone";
 
 // Agency tab: the searchable statewide IDPH directory. Data
@@ -27,8 +27,8 @@ import { telHref } from "../lib/phone";
 //
 // Tapping an agency name opens its profile card (Jake,
 // 2026-10-30): every field the API carries for that agency,
-// plus the local-details editor (short name + notes, PIN-gated)
-// that used to live in a table row.
+// plus the local-details editor (short name + notes, role-gated
+// to managers/admins) that used to live in a table row.
 
 // CMS service lines (Jake, 2026-10-30): the six disciplines the
 // CMS dataset reports Yes/No for. `field` is the ApiAgency
@@ -154,13 +154,8 @@ export default function AgencyView({
   const [shortNameDraft, setShortNameDraft] = useState("");
   const [notesDraft, setNotesDraft] = useState("");
 
-  const [pinPrompt, setPinPrompt] = useState(false);
-  const [pinInput, setPinInput] = useState("");
-  const [pinError, setPinError] = useState<string | null>(null);
-  const pinRef = useRef<string | null>(null);
-  const pendingResolveRef = useRef<((pin: string | null) => void) | null>(
-    null,
-  );
+  const me = useMyStaff(user);
+  const isManager = isManagerRole(me);
 
   useEffect(() => {
     if (!apiConnected) return;
@@ -191,56 +186,6 @@ export default function AgencyView({
     };
   }, [user, apiConnected, query, showInactive, serviceFilter, minRating]);
 
-  function ensurePin(): Promise<string | null> {
-    if (pinRef.current) return Promise.resolve(pinRef.current);
-    return new Promise((resolve) => {
-      setPinError(null);
-      setPinInput("");
-      setPinPrompt(true);
-      pendingResolveRef.current = resolve;
-    });
-  }
-
-  async function submitPin(e: React.FormEvent) {
-    e.preventDefault();
-    const pin = pinInput.trim();
-    if (!pin) return;
-    try {
-      await verifyManagerPin(user, pin);
-    } catch (err) {
-      setPinError(
-        isPinRejection(err)
-          ? "That PIN was not accepted. Changes need an active manager or admin PIN."
-          : "Could not verify the PIN — the API may be unreachable. Nothing was changed.",
-      );
-      return;
-    }
-    pinRef.current = pin;
-    setPinPrompt(false);
-    pendingResolveRef.current?.(pin);
-    pendingResolveRef.current = null;
-  }
-
-  function cancelPin() {
-    setPinPrompt(false);
-    pendingResolveRef.current?.(null);
-    pendingResolveRef.current = null;
-  }
-
-  async function withPin<T>(fn: (pin: string) => Promise<T>): Promise<T | null> {
-    const pin = await ensurePin();
-    if (!pin) return null;
-    try {
-      return await fn(pin);
-    } catch (err) {
-      if (isPinRejection(err)) pinRef.current = null;
-      setActionError(
-        err instanceof Error ? err.message : "The change could not be saved.",
-      );
-      return null;
-    }
-  }
-
   function startEdit(a: ApiAgency) {
     setEditing(true);
     setShortNameDraft(a.short_name ?? "");
@@ -251,52 +196,25 @@ export default function AgencyView({
   async function saveEdit(a: ApiAgency) {
     setActionError(null);
     setBusyId(a.id);
-    const updated = await withPin((pin) =>
-      updateAgency(user, pin, a.id, {
+    try {
+      const updated = await updateAgency(user, a.id, {
         short_name: shortNameDraft.trim() === "" ? null : shortNameDraft,
         notes: notesDraft.trim() === "" ? null : notesDraft,
-      }),
-    );
-    setBusyId(null);
-    if (updated) {
+      });
       setEditing(false);
       setRows((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
+    } catch (err) {
+      setActionError(
+        isRoleRejection(err)
+          ? "Editing agency details needs a manager or admin role."
+          : err instanceof Error
+            ? err.message
+            : "The change could not be saved.",
+      );
+    } finally {
+      setBusyId(null);
     }
   }
-
-  const pinPanel = pinPrompt ? (
-    <form className="pin-panel" onSubmit={submitPin}>
-      <label className="pin-label" htmlFor="agency-view-pin">
-        Manager PIN required for agency changes
-      </label>
-      <div className="pin-row">
-        <input
-          id="agency-view-pin"
-          type="password"
-          inputMode="numeric"
-          autoComplete="off"
-          value={pinInput}
-          onChange={(e) => setPinInput(e.target.value)}
-          placeholder="Manager PIN"
-        />
-        <button type="submit" className="btn btn-primary">
-          Verify &amp; continue
-        </button>
-        <button
-          type="button"
-          className="btn btn-secondary"
-          onClick={cancelPin}
-        >
-          Cancel
-        </button>
-      </div>
-      {pinError && (
-        <p className="danger-note" role="alert">
-          {pinError}
-        </p>
-      )}
-    </form>
-  ) : null;
 
   if (selected) {
     const a = selected;
@@ -344,7 +262,6 @@ export default function AgencyView({
               {actionError}
             </p>
           )}
-          {pinPanel}
           <div className="agency-profile-grid">
             {a.dba && (
               <div>
@@ -443,7 +360,7 @@ export default function AgencyView({
           )}
           <div className="card-top">
             <strong>Local details</strong>
-            {!editing && (
+            {!editing && isManager && (
               <button
                 type="button"
                 className="btn btn-secondary"
@@ -481,7 +398,7 @@ export default function AgencyView({
                   disabled={busyId === a.id}
                   onClick={() => void saveEdit(a)}
                 >
-                  Save local details (PIN)
+                  Save local details
                 </button>
                 <button
                   type="button"

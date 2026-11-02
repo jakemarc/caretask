@@ -15,11 +15,10 @@
 //   the team / Duplicate in file); Ready rows start checked,
 //   problem rows unchecked and locked. Nothing saves until the
 //   Import button is pressed.
-// - Staff import is manager-PIN gated FIRST (verified against the
-//   API, PIN held in memory only while this card is open), the
-//   same pattern as the Clinician-tab staff import and Settings →
-//   Visit categories. Imported staff start as unauthorized
-//   clinicians.
+// - Staff import is role-gated (manager/admin): the API rejects
+//   staff writes from any other role, and this card only offers
+//   the staff flow to managers (the manager PIN was retired on
+//   2026-11-02). Imported staff start as unauthorized clinicians.
 // - Fails closed: with no API connection the card shows the
 //   not-connected notice and no import is possible.
 import { useRef, useState } from "react";
@@ -34,14 +33,14 @@ import {
 import {
   createPatient,
   createStaff,
-  isPinRejection,
+  isRoleRejection,
   listPatients,
   listUsers,
-  verifyManagerPin,
   type ApiUser,
   type NewApiPatient,
   type StaffInput,
 } from "../lib/patientApi";
+import { isManagerRole, useMyStaff } from "../lib/useMyRole";
 
 interface Props {
   user: User;
@@ -128,6 +127,8 @@ export default function CsvImport({
   apiConnected,
   onPatientsImported,
 }: Props) {
+  const me = useMyStaff(user);
+  const isManager = isManagerRole(me);
   const [flow, setFlow] = useState<Target | null>(null);
   const [fileName, setFileName] = useState("");
   const [parseError, setParseError] = useState("");
@@ -136,15 +137,6 @@ export default function CsvImport({
   const [saving, setSaving] = useState(false);
   const [summary, setSummary] = useState<ImportSummary | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-
-  // Staff import PIN gate (verified PIN held in memory only while
-  // this card's flow is open).
-  const [pinGateOpen, setPinGateOpen] = useState(false);
-  const [pinEntry, setPinEntry] = useState("");
-  const [pinError, setPinError] = useState("");
-  const [pinChecking, setPinChecking] = useState(false);
-  const [verifiedPin, setVerifiedPin] = useState("");
-  const [authorizer, setAuthorizer] = useState("");
 
   if (!apiConnected) {
     return (
@@ -166,18 +158,12 @@ export default function CsvImport({
     setRows(null);
     setDupCheckFailed(false);
     setSummary(null);
-    setPinGateOpen(false);
-    setPinEntry("");
-    setPinError("");
   }
 
   function closeFlow() {
     setFlow(null);
     setRows(null);
     setSummary(null);
-    setPinGateOpen(false);
-    setVerifiedPin("");
-    setAuthorizer("");
   }
 
   function buildRows(
@@ -376,7 +362,7 @@ export default function CsvImport({
     setSaving(false);
   }
 
-  async function doImportStaff(pin: string) {
+  async function doImportStaff() {
     if (!flow || flow !== "staff" || selectedRows.length === 0) return;
     setSaving(true);
     let imported = 0;
@@ -385,22 +371,18 @@ export default function CsvImport({
     const results = new Map<string, string>();
     for (const row of selectedRows) {
       try {
-        await createStaff(user, buildStaffInput(row.contact), pin);
+        await createStaff(user, buildStaffInput(row.contact));
         imported += 1;
         results.set(row.key, "Imported");
       } catch (err) {
-        if (isPinRejection(err)) {
+        if (isRoleRejection(err)) {
           // Stop immediately — every further write would fail the
-          // same way. Keep the partial counts honest and send the
-          // user back to the PIN gate.
+          // same way. Keep the partial counts honest.
           failures.push({
             name: row.contact.candidate.displayName,
-            reason: "PIN rejected by the server — import stopped",
+            reason: "Adding staff needs a manager or admin role — import stopped",
           });
           failed += 1;
-          setVerifiedPin("");
-          setPinError("That PIN was rejected — try again.");
-          setPinGateOpen(true);
           break;
         }
         const code = (err as { code?: string } | null)?.code;
@@ -437,39 +419,8 @@ export default function CsvImport({
     setSummary(null);
     if (flow === "patients") {
       void doImportPatients();
-    } else if (verifiedPin) {
-      void doImportStaff(verifiedPin);
     } else {
-      setPinError("");
-      setPinEntry("");
-      setPinGateOpen(true);
-    }
-  }
-
-  async function submitPin(e: React.FormEvent) {
-    e.preventDefault();
-    const pin = pinEntry.trim();
-    if (!/^\d{4,8}$/.test(pin)) {
-      setPinError("PINs are 4–8 digits.");
-      return;
-    }
-    setPinChecking(true);
-    setPinError("");
-    try {
-      const manager = await verifyManagerPin(user, pin);
-      setVerifiedPin(pin);
-      setAuthorizer(manager.name);
-      setPinGateOpen(false);
-      setPinEntry("");
-      void doImportStaff(pin);
-    } catch (err) {
-      setPinError(
-        isPinRejection(err)
-          ? "Incorrect PIN"
-          : "Couldn't verify the PIN — check the connection and try again.",
-      );
-    } finally {
-      setPinChecking(false);
+      void doImportStaff();
     }
   }
 
@@ -498,12 +449,14 @@ export default function CsvImport({
         >
           Import patients
         </button>
-        <button
-          className="btn btn-secondary"
-          onClick={() => openFlow("staff")}
-        >
-          Import staff
-        </button>
+        {isManager && (
+          <button
+            className="btn btn-secondary"
+            onClick={() => openFlow("staff")}
+          >
+            Import staff
+          </button>
+        )}
       </div>
 
       {flow && (
@@ -525,7 +478,7 @@ export default function CsvImport({
           <p className="section-note">
             {flow === "patients"
               ? "Patients need a first and last name — rows missing either can't be imported. Date of birth and sex are optional."
-              : "Staff need an email, first name, and last name. Imported staff start as clinicians who are not yet authorized; a manager can change the role afterwards. A manager PIN is required to save."}
+              : "Staff need an email, first name, and last name. Imported staff start as clinicians who are not yet authorized; a manager can change the role afterwards."}
           </p>
           <input
             ref={fileRef}
@@ -663,11 +616,6 @@ export default function CsvImport({
                   start checked, including any beyond the preview).
                 </p>
               )}
-              {authorizer && flow === "staff" && (
-                <p className="card-meta">
-                  Manager PIN verified for {authorizer}.
-                </p>
-              )}
               <div className="flag-actions">
                 <button
                   className="btn btn-primary"
@@ -682,40 +630,6 @@ export default function CsvImport({
                 </button>
               </div>
             </>
-          )}
-
-          {pinGateOpen && (
-            <form className="pin-panel" onSubmit={submitPin}>
-              <label>
-                Manager PIN required to import staff
-                <input
-                  type="password"
-                  inputMode="numeric"
-                  autoComplete="off"
-                  value={pinEntry}
-                  onChange={(e) => setPinEntry(e.target.value)}
-                  placeholder="PIN"
-                />
-              </label>
-              <p>Enter any active manager or admin PIN.</p>
-              {pinError && <p className="pin-error">{pinError}</p>}
-              <div className="profile-actions">
-                <button
-                  className="btn btn-primary"
-                  type="submit"
-                  disabled={pinChecking}
-                >
-                  {pinChecking ? "Verifying…" : "Unlock"}
-                </button>
-                <button
-                  className="btn btn-secondary"
-                  type="button"
-                  onClick={() => setPinGateOpen(false)}
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
           )}
 
           {summary && (

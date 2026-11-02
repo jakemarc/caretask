@@ -120,7 +120,7 @@ async function main() {
     const testPinHash = await hashPin(TEST_PIN);
     await pool.query(
       `INSERT INTO users (email, role, authorized, fname, lname, pin_hash)
-       VALUES ('manager@example.com', 'manager', false, 'Test', 'Manager', $1)
+       VALUES ('tester@example.com', 'manager', false, 'Test', 'Manager', $1)
        ON CONFLICT (email) DO UPDATE
          SET pin_hash = EXCLUDED.pin_hash, role = 'manager', active = true`,
       [testPinHash],

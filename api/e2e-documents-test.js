@@ -283,29 +283,27 @@ async function main() {
     check('finalize again → 409 DOCUMENT_FINALIZED',
       r.status === 409 && (await r.json()).code === 'DOCUMENT_FINALIZED', `got ${r.status}`);
 
-    // --- delete / restore (manager PIN)
+    // --- delete / restore (manager ROLE; the PIN and its borrowed
+    // authority were retired on 2026-11-02)
     r = await call('DELETE', `/documents/${docB.id}`, AUTHOR);
-    check('DELETE without PIN → 403 PIN_REQUIRED',
-      r.status === 403 && (await r.json()).code === 'PIN_REQUIRED', `got ${r.status}`);
-    r = await call('DELETE', `/documents/${docB.id}`, AUTHOR, undefined, '9999');
-    check('DELETE with wrong PIN → 403 PIN_INVALID',
-      r.status === 403 && (await r.json()).code === 'PIN_INVALID', `got ${r.status}`);
-    r = await call('DELETE', `/documents/${docB.id}`, AUTHOR, undefined, '1234');
+    check('DELETE as clinician → 403 ROLE_REQUIRED',
+      r.status === 403 && (await r.json()).code === 'ROLE_REQUIRED', `got ${r.status}`);
+    r = await call('DELETE', `/documents/${docB.id}`, MANAGER);
     const deleted = (await r.json()).document;
-    check('DELETE with PIN 1234 → 200 and deleted_at set',
+    check('DELETE as manager → 200 and deleted_at set',
       r.status === 200 && deleted && deleted.deleted_at !== null, `got ${r.status}`);
     r = await call('GET', `/documents/${docB.id}`, AUTHOR);
     check('GET after delete → 404', r.status === 404, `got ${r.status}`);
     r = await call('GET', `/documents?patient_id=${livePatient}`, AUTHOR);
     check('list excludes the deleted doc',
       !(await r.json()).documents.some((d) => Number(d.id) === Number(docB.id)));
-    r = await call('POST', `/documents/${docB.id}/restore`, AUTHOR, undefined, '1234');
+    r = await call('POST', `/documents/${docB.id}/restore`, MANAGER);
     const restored = (await r.json()).document;
-    check('restore with PIN → 200, deleted_at null',
+    check('restore as manager → 200, deleted_at null',
       r.status === 200 && restored && restored.deleted_at === null, `got ${r.status}`);
     r = await call('GET', `/documents/${docB.id}`, AUTHOR);
     check('GET works again after restore', r.status === 200, `got ${r.status}`);
-    r = await call('POST', `/documents/${docB.id}/restore`, AUTHOR, undefined, '1234');
+    r = await call('POST', `/documents/${docB.id}/restore`, MANAGER);
     check('restore when not deleted → 409 NOT_DELETED',
       r.status === 409 && (await r.json()).code === 'NOT_DELETED', `got ${r.status}`);
 

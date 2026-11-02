@@ -6,6 +6,40 @@ built and verified but not deployed.
 
 ## 2026-11-02
 
+- **Manager PIN removed → role gates — Live 2026-11-02
+  (deploy-26: API patch on the VM + dashboard bundle
+  `index-Deu836Rg.js`, deployment
+  https://907b5cc1.marcinnotech-app.pages.dev, verified —
+  Cloudflare API reports it as the canonical production
+  deployment, the deployment URL serves the new bundle,
+  API /health green, unsigned requests 401).** Jake's call:
+  "Remove the PIN — role gates instead." API: new
+  `lib/requireRole.js` (`requireRole` / `attachManager`);
+  `lib/requireManagerPin.js` deleted; `POST /users/verify-pin`
+  removed. Gate map: patient delete/restore, all staff writes,
+  category writes, appointment delete/restore, document
+  delete/restore, agency sync/update → manager/admin role of
+  the CALLER (403 `NO_STAFF_RECORD` / `ROLE_REQUIRED`);
+  patient PUT and appointment PUT are now UNGATED (caller
+  identity still attached for audit attribution). Expense
+  approve/reject/pay are manager-role plus a self-processing
+  block (403 `SELF_APPROVAL` — a manager cannot process their
+  own report). `lib/pin.js` / `users.pin_hash` are dormant.
+  Dashboard: role comes from `GET /users/me` once per sign-in
+  (`useMyRole`); Edit opens directly everywhere (no PIN panel);
+  manager-only controls (patient Delete, staff writes,
+  category editing, agency sync, document Delete, expense
+  review) render only for manager/admin, with plain-language
+  explanations for everyone else; the patient profile gains a
+  **Manage list** block (Put on hold / Discharge / Return to
+  active) for all clinicians — Jake's refinement: a clinician
+  removes a patient from their list by status, not delete.
+  Deploy note: the first API attempt stopped at its dry-run —
+  the VM's `routes/appointments.js` carries comment drift from
+  the Oct 30 transmissions, so 3 patch hunks failed context;
+  the round completed with a split patch (7 file ops) plus an
+  asserted 9-swap script for that one file. All 8 e2e suites
+  green locally before deploy.
 - **Standard mobile header — Live 2026-11-02 (deploy-25:
   dashboard bundle `index-uH1O1clT.js`, deployment
   https://46719cf6.marcinnotech-app.pages.dev, verified —

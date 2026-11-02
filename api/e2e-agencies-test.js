@@ -177,21 +177,16 @@ async function main() {
     res = await call('GET', '/agencies/primary');
     check('primary is null before any is set', (await res.json()) === null);
 
-    // --- PIN gating
+    // --- role gating (manager PIN retired 2026-11-02)
+    await pool.query("UPDATE users SET role = 'clinician' WHERE email = $1", [CALLER]);
     res = await call('PUT', `/agencies/${alphaId}`, { notes: 'x' });
     let body = await res.json();
-    check('PUT without PIN → 403 PIN_REQUIRED',
-      res.status === 403 && body.code === 'PIN_REQUIRED', `got ${res.status}/${body.code}`);
-    res = await call('PUT', `/agencies/${alphaId}`, { notes: 'x' }, '9999');
-    body = await res.json();
-    check('PUT with wrong PIN → 403 PIN_INVALID',
-      res.status === 403 && body.code === 'PIN_INVALID', `got ${res.status}/${body.code}`);
+    check('PUT as clinician → 403 ROLE_REQUIRED',
+      res.status === 403 && body.code === 'ROLE_REQUIRED', `got ${res.status}/${body.code}`);
     res = await call('POST', '/agencies/sync', {});
-    check('POST /sync without PIN → 403 PIN_REQUIRED',
-      res.status === 403 && (await res.json()).code === 'PIN_REQUIRED');
-    res = await call('POST', '/agencies/sync', {}, '9999');
-    check('POST /sync with wrong PIN → 403 PIN_INVALID',
-      res.status === 403 && (await res.json()).code === 'PIN_INVALID');
+    check('POST /sync as clinician → 403 ROLE_REQUIRED',
+      res.status === 403 && (await res.json()).code === 'ROLE_REQUIRED');
+    await pool.query("UPDATE users SET role = 'manager' WHERE email = $1", [CALLER]);
 
     // --- local fields via API (set primary + notes on TEST-002)
     const beta = await pool.query(

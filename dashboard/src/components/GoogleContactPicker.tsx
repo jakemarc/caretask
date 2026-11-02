@@ -3,7 +3,7 @@
 // multi (the Clinician tab — checkbox several contacts, import them
 // as staff). The picker only FETCHES and lets the user choose; what
 // a pick creates is the caller's business (patient form prefill, or
-// PIN-gated staff creation).
+// role-gated staff creation).
 //
 // Source choice: connect the user's own Google account (read-only
 // scope, token in memory only) when an OAuth client is configured,
@@ -103,7 +103,7 @@ export default function GoogleContactPicker({ mode, onPick, onClose }: Props) {
             fetched once for this import, nothing syncs or stays behind.
             {mode === "single"
               ? " Picking a contact fills in the form; nothing is saved until you save the patient."
-              : " Picked contacts become staff records — a manager PIN confirms the import."}
+              : " Picked contacts become staff records when you confirm the import."}
           </p>
           <div className="profile-actions">
             <button

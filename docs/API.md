@@ -15,14 +15,16 @@ behind Caddy on the VM. Config from `~/patient-api/.env` on the VM
 `DASHBOARD_ORIGIN` (CORS), `PORT`, `FIREBASE_PROJECT_ID`.
 
 ```
-server.js            app wiring, CORS (incl. X-Manager-Pin header)
+server.js            app wiring, CORS
 auth.js              Firebase ID-token verification + allowlist
 db.js                pg pool
 routes/patients.js   patient CRUD + soft delete/restore + audit fetch
-routes/users.js      staff directory + PIN-gated staff writes
+routes/users.js      staff directory + role-gated staff writes
 routes/events.js     event query + chain verify + client event intake
-lib/pin.js           scrypt PIN hashing/verification
-lib/requireManagerPin.js  X-Manager-Pin middleware
+lib/pin.js           scrypt PIN hashing (DORMANT since 2026-11-02:
+                     seed-users only — the PIN gate is retired)
+lib/requireRole.js   role gates (requireRole / attachManager);
+                     replaced lib/requireManagerPin.js 2026-11-02
 lib/hashChain.js     canonical hash form for audit/event rows
 lib/eventLog.js      event insert helpers
 lib/requestLog.js    request → event_log folding (method/path/status;
@@ -33,7 +35,8 @@ schema-patients-v2.sql  patients v2 migration (DESTRUCTIVE — demo only)
 schema-patients-map.sql  patients latitude/longitude (idempotent)
 schema-users.sql     users table
 seed.js              8 fictional patients
-seed-users.js        5 fictional/demo staff (resets demo PINs to 1234)
+seed-users.js        5 fictional/demo staff (still sets demo PIN
+                     hashes — dormant, nothing verifies them)
 scripts/verify-chain.js  standalone chain verification
 e2e-*.js             four end-to-end suites (see DEVELOPMENT.md)
 ```
@@ -54,7 +57,7 @@ is not allowlisted.
 |---|---|
 | `GET /health` | open; liveness |
 | `GET /patients?q=&status=` | q matches fname/lname/preferred_name/email (ILIKE) |
-| `POST /patients` | create (NOT PIN-gated — intake is a front-desk act). Requires only `fname` + `lname`. `date_of_birth` and `sex` are OPTIONAL (Jake, 2026-11-01 — they were required 2026-10-30 → 2026-11-01 with 400 `DOB_REQUIRED` / `SEX_REQUIRED`; those codes are retired). An empty-string `date_of_birth` normalizes to NULL; a provided one must still be YYYY-MM-DD. Accepts the stored-age fallback `age` (integer 0–130, else 400) for patients whose birth date is unknown. |
+| `POST /patients` | create (NOT gated — intake is a front-desk act). Requires only `fname` + `lname`. `date_of_birth` and `sex` are OPTIONAL (Jake, 2026-11-01 — they were required 2026-10-30 → 2026-11-01 with 400 `DOB_REQUIRED` / `SEX_REQUIRED`; those codes are retired). An empty-string `date_of_birth` normalizes to NULL; a provided one must still be YYYY-MM-DD. Accepts the stored-age fallback `age` (integer 0–130, else 400) for patients whose birth date is unknown. |
 
 Patient agency fields (built locally 2026-10-30, not yet
 deployed): create/update accept `agency_id` (integer; must
@@ -66,55 +69,55 @@ Every patient read (list, get, create/update responses)
 carries `agency_id`, `agency_name_text`, and the resolved
 read-only `agency_name` (the linked agency's display_name,
 else the free text, else null). Agency changes ride the
-normal PIN-gated update, so the audit_log snapshots preserve
+normal patient update (ungated since 2026-11-02), so the
+  audit_log snapshots preserve
 the patient's agency history.
 | `GET /patients/:id` | logs a `patient_view` event |
-| `PUT /patients/:id` | **PIN-gated** |
-| `DELETE /patients/:id` | **PIN-gated**; soft delete (deleted_at) |
-| `POST /patients/:id/restore` | **PIN-gated** |
+| `PUT /patients/:id` | NOT gated (any signed-in user; the caller's staff identity is attached for audit attribution) |
+| `DELETE /patients/:id` | **Role-gated (manager/admin)**; soft delete (deleted_at) |
+| `POST /patients/:id/restore` | **Role-gated (manager/admin)** |
 | `GET /patients/:id/audit` | audit_log rows for the patient |
 | `GET /users` | staff list — safe columns only, `pin_hash` is NEVER returned (`has_pin` boolean instead) |
 | `GET /users/me` | caller's staff row or null |
 | `GET /users/clinicians` | authorized AND active staff (the assignable providers) |
-| `POST /users/verify-pin` | `{ok, manager:{…}}` or 403 — how the dashboard checks a PIN |
-| `POST /users` | **PIN-gated** create; 409 `EMAIL_EXISTS` on duplicate |
-| `PUT /users/:id` | **PIN-gated**; may set that member's PIN (plaintext in, scrypt hash stored, never echoed) |
-| `DELETE /users/:id` | **PIN-gated** DEACTIVATE (active=false — rows are never hard-deleted); 400 `SELF_DEACTIVATE` for your own account |
-| `POST /users/:id/restore` | **PIN-gated** reactivate |
+| `POST /users` | **Role-gated (manager/admin)** create; 409 `EMAIL_EXISTS` on duplicate |
+| `PUT /users/:id` | **Role-gated (manager/admin)**; a `pin` field in the body is ignored (PINs retired 2026-11-02; `pin_hash` column dormant) |
+| `DELETE /users/:id` | **Role-gated (manager/admin)** DEACTIVATE (active=false — rows are never hard-deleted); 400 `SELF_DEACTIVATE` for your own account |
+| `POST /users/:id/restore` | **Role-gated (manager/admin)** reactivate |
 | `GET /events` | filters: event, actor_email, patient_id, from, to; limit ≤ 200 |
 | `GET /events/verify` | recompute both hash chains |
 | `POST /events` | client-reported events only: sign_in, sign_out, report_export |
 | `GET /appointments/categories` | active categories (OpenEMR-correlated: color + default duration + cattype); `?all=1` includes inactive |
-| `POST /appointments/categories` | **PIN-gated** create category (Settings screen) |
-| `PUT /appointments/categories/:id` | **PIN-gated** update (name/color/kind/default minutes/description/active) |
-| `DELETE /appointments/categories/:id` | **PIN-gated** deactivate (active=false; never a hard delete) |
-| `POST /appointments/categories/:id/restore` | **PIN-gated** reactivate |
+| `POST /appointments/categories` | **Role-gated (manager/admin)** create category (Settings screen) |
+| `PUT /appointments/categories/:id` | **Role-gated (manager/admin)** update (name/color/kind/default minutes/description/active) |
+| `DELETE /appointments/categories/:id` | **Role-gated (manager/admin)** deactivate (active=false; never a hard delete) |
+| `POST /appointments/categories/:id/restore` | **Role-gated (manager/admin)** reactivate |
 | `GET /messages` | my inbox (newest first); `?sent=1` outbox, `?unread=1` unread only; caller must resolve to an active users row (403 `NO_STAFF_RECORD`) |
 | `GET /messages/patient/:uuid` | a patient's chart messages (care-team readable) |
 | `GET /messages/threads/:id` | one conversation (participants, or any staff when patient-linked) |
-| `POST /messages` | send (NOT PIN-gated); recipient and/or patient required |
+| `POST /messages` | send (NOT gated); recipient and/or patient required |
 | `POST /messages/:id/read` | mark read (recipient only; idempotent) |
 | `DELETE /messages/:id` | soft delete (sender only) |
 | `GET /documents?patient_id=` | a patient's clinical documents, newest first (deleted excluded); caller must resolve to an active users row (403 `NO_STAFF_RECORD`) |
 | `GET /documents/:id` | one document (404 when missing/soft-deleted) |
-| `POST /documents` | create draft (NOT PIN-gated); author = resolved staff user; `doc_type` ∈ evaluation/reassessment/discharge; optional `appointment_id` must belong to the patient |
+| `POST /documents` | create draft (NOT gated); author = resolved staff user; `doc_type` ∈ evaluation/reassessment/discharge; optional `appointment_id` must belong to the patient |
 | `PUT /documents/:id` | edit a DRAFT (title/sections/appointment link); finalized documents are locked → 409 `DOCUMENT_FINALIZED` |
 | `POST /documents/:id/finalize` | finalize (sets status/finalized_at/finalized_by; re-finalize → 409 `DOCUMENT_FINALIZED`) |
-| `DELETE /documents/:id` | **PIN-gated** soft delete |
-| `POST /documents/:id/restore` | **PIN-gated** undo soft delete (409 `NOT_DELETED` when not deleted) |
+| `DELETE /documents/:id` | **Role-gated (manager/admin)** soft delete |
+| `POST /documents/:id/restore` | **Role-gated (manager/admin)** undo soft delete (409 `NOT_DELETED` when not deleted) |
 | `GET /appointments/statuses` | status list in flow order, with is_checkin/is_checkout flags |
 | `GET /appointments?from=&to=&patient_id=&provider_id=` | overlap-window list, joined with patient/provider/category names |
-| `POST /appointments` | create (NOT PIN-gated — booking is a front-desk act) |
-| `PUT /appointments/:id` | **PIN-gated** update |
+| `POST /appointments` | create (NOT gated — booking is a front-desk act) |
+| `PUT /appointments/:id` | NOT gated update (attribution recorded; enables drag-reschedule) |
 | `POST /appointments/:id/status` | status-only change (NOT gated — flow-board pattern); logged with from/to |
-| `DELETE /appointments/:id` | **PIN-gated**; soft delete |
-| `POST /appointments/:id/restore` | **PIN-gated** |
+| `DELETE /appointments/:id` | **Role-gated (manager/admin)**; soft delete |
+| `POST /appointments/:id/restore` | **Role-gated (manager/admin)** |
 | `GET /agencies?q=&active=&service=&min_rating=&limit=&offset=` | IDPH directory (live 2026-10-30); q matches name/dba/short_name/city/license_number; rows carry a computed `display_name` plus the CMS columns (ccn, offers_*, star_rating, cms_ownership, cms_cert_date, cms_matched_at). `service` = comma list of nursing,pt,ot,speech,msw,hha — agency must offer ALL (unknown value → 400); `min_rating` = number 0–5, star_rating >= value, unrated excluded (CMS filters built locally 2026-10-30, not yet deployed) |
 | `GET /agencies/primary` | the `is_primary` ("our agency") row, or JSON null |
 | `GET /agencies/sync-status` | latest `agency_sync` event as `{last_run_at, …counts}`, or null |
 | `GET /agencies/:id` | one agency (404 for non-numeric/missing) |
-| `POST /agencies/sync` | **PIN-gated**; runs the IDPH sync now; upstream failure → 502 `SYNC_FAILED` |
-| `PUT /agencies/:id` | **PIN-gated**; LOCAL fields only (is_primary/notes/short_name); setting is_primary clears it elsewhere in the same transaction; logs `admin_action` (action `agency_update`) |
+| `POST /agencies/sync` | **Role-gated (manager/admin)**; runs the IDPH sync now; upstream failure → 502 `SYNC_FAILED` |
+| `PUT /agencies/:id` | **Role-gated (manager/admin)**; LOCAL fields only (is_primary/notes/short_name); setting is_primary clears it elsewhere in the same transaction; logs `admin_action` (action `agency_update`) |
 
 Agency sync (`lib/agencySync.js`, shared by the route, the CLI
 `sync-agencies.js`, and the weekly systemd timer): fetches the
@@ -176,11 +179,14 @@ active users row (403 `NO_STAFF_RECORD` otherwise).
   non-mileage lines (category CHECK list, `amount_cents`
   integer ≥ 0).
 - Lifecycle: `POST /:id/submit` (owner; draft → submitted,
-  stamps submitted_at) · `POST /:id/approve` (manager PIN;
-  records approved_by/at) · `POST /:id/reject` (manager PIN;
+  stamps submitted_at) · `POST /:id/approve` (manager role;
+  records approved_by/at) · `POST /:id/reject` (manager role;
   returns the report to draft, clears submitted_at) ·
-  `POST /:id/pay` (manager PIN; approved → paid, optional
-  payment_ref).
+  `POST /:id/pay` (manager role; approved → paid, optional
+  payment_ref). Approve/reject/pay additionally refuse the
+  report's OWN owner with 403 `SELF_APPROVAL` — a manager
+  cannot process their own report (Jake's two accounts are
+  separate users rows, so one can still process the other's).
 - **Day math:** daily reimbursable = max(0, driven −
   commute). Mileage dollars: when every entry carries a rate
   (the normal one-rate month), each day claims
@@ -196,20 +202,33 @@ active users row (403 `NO_STAFF_RECORD` otherwise).
   addresses, amounts, or notes. Suite: `e2e-expenses-test.js`
   (42 checks, all passing locally 2026-11-01).
 
-## The manager-PIN gate (lib/requireManagerPin.js)
+## Role gates (lib/requireRole.js) — replaced the manager-PIN gate 2026-11-02
 
-- Header `X-Manager-Pin`; missing → 403 `PIN_REQUIRED`; malformed
-  (not 4–8 digits) or unmatched → 403 `PIN_INVALID`.
-- A PIN matches the first active manager/admin (in id order) whose
-  scrypt hash verifies. The gate sets `req.manager`, and the route
-  writes an `admin_action` event in the same transaction naming
-  that manager and the target.
-- PINs belong to people, not to the caller: any manager's PIN can
-  authorize any gated write, and the audit trail attributes it to
-  the PIN's owner. This is the classic override model.
-- Appointment gated writes follow the same gate but log an
-  `appointment_change` event (details name the manager) instead of
-  `admin_action`.
+Jake's decision (2026-11-02): "Remove the PIN — role gates
+instead." The PIN model let any signed-in user perform a manager
+action by borrowing a manager's PIN; the role model ties the
+authority to the signed-in account's OWN staff role.
+
+- `requireRole('manager', 'admin')` resolves the caller's ACTIVE
+  users row by the token's email. No row → 403 `NO_STAFF_RECORD`;
+  wrong role → 403 `ROLE_REQUIRED`. On success it sets `req.staff`
+  and `req.manager` = the CALLER, so handler audit/event
+  attribution (which already names `req.manager`) stays truthful —
+  the authorizer IS the caller now.
+- `attachManager` is the non-gating variant on routes that dropped
+  their gate (patient update, appointment update): it attaches the
+  same identity when a staff row exists and falls back to
+  `{id: null, email, role: null}` when it doesn't.
+- Gated surface: patient delete/restore; all staff writes;
+  category create/update/deactivate/restore; appointment
+  delete/restore; document delete/restore; agency sync/update;
+  expense approve/reject/pay (manager role + the SELF_APPROVAL
+  block above).
+- Retired with the PIN: the `X-Manager-Pin` header, error codes
+  `PIN_REQUIRED` / `PIN_INVALID`, `POST /users/verify-pin`, and
+  `lib/requireManagerPin.js` (deleted). `lib/pin.js` and the
+  `users.pin_hash` column remain but are DORMANT — seed-users still
+  writes hashes; nothing verifies them.
 
 ## Validation rules (patients & staff)
 
@@ -246,16 +265,17 @@ carry ids and doc_type only — never title or section content.
 - `patients.clinician` is still free text ("Unassigned" default);
   the patient form is not yet wired to pick from `GET
   /users/clinicians`.
-- Roles are recorded but not yet *enforced* beyond the PIN gate
-  (e.g., a developer role seeing the Audit Log but not patient rows
-  is future API work).
+- Roles are enforced for writes via the role gates above
+  (manager/admin) since 2026-11-02; finer READ-side scoping
+  (e.g., a developer role seeing the Audit Log but not patient
+  rows) is still future API work.
 - Audit snapshots include `ss` / `drivers_license` verbatim —
   redaction is required before any real data (see ARCHITECTURE.md).
 - Appointments: no recurrence yet (OpenEMR's
   pc_recurrtype/pc_recurrspec series + edit-one/future/all is a
   deliberate deferral), no facility/billing-facility fields (no
   facility table yet). Categories are editable in Settings →
-  Visit categories (PIN-gated); statuses are still seeded data
+  Visit categories (role-gated); statuses are still seeded data
   only (`seed-appointment-lists.js`), no admin UI.
 - Documents: clinical documentation v1 is LIVE (deployed
   2026-10-30 in the maps + agency round). Templates are fixed in code

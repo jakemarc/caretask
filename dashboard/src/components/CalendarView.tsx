@@ -3,17 +3,17 @@ import type { User } from "firebase/auth";
 import {
   createAppointment,
   deleteAppointment,
-  isPinRejection,
+  isRoleRejection,
   listAppointmentCategories,
   listAppointmentStatuses,
   listAppointments,
   setAppointmentStatus,
   updateAppointment,
-  verifyManagerPin,
   type ApiAppointment,
   type AppointmentCategory,
   type AppointmentStatusInfo,
 } from "../lib/patientApi";
+import { isManagerRole, useMyStaff } from "../lib/useMyRole";
 import DayScheduleMap from "./DayScheduleMap";
 import type { MapPatientLike } from "../lib/geo";
 
@@ -21,8 +21,9 @@ import type { MapPatientLike } from "../lib/geo";
 // appointments API (OpenEMR-correlated model: categories carry the
 // color + default duration, provider is a staff member, statuses
 // come from the API's flow list). Month / Week / Agenda views,
-// click-a-day booking, one-click status changes (flow board), and
-// manager-PIN gates on edit/delete — the same rules as patients.
+// click-a-day booking, one-click status changes (flow board),
+// ungated edits, and a manager/admin role gate on delete — the
+// same rules as patients (the manager PIN was retired 2026-11-02).
 
 type CalView = "month" | "week" | "agenda" | "map";
 
@@ -77,6 +78,8 @@ export default function CalendarView({
   clinicians,
   onOpenPatient,
 }: Props) {
+  const me = useMyStaff(user);
+  const isManager = isManagerRole(me);
   // Default view is the daily schedule (agenda), anchored on
   // today (Jake, 2026-10-31). The agenda range below is today
   // forward 31 days, so today's visits are always fetched.
@@ -111,14 +114,12 @@ export default function CalendarView({
   const [fStatus, setFStatus] = useState("booked");
   const [saving, setSaving] = useState(false);
 
-  // Manager-PIN gate for edit-save and delete (mirrors the staff
-  // pattern: verified PIN held in memory only while this view lives).
-  const [gate, setGate] = useState<"save" | "delete" | null>(null);
-  const [pinEntry, setPinEntry] = useState("");
-  const [pinError, setPinError] = useState("");
-  const [pinChecking, setPinChecking] = useState(false);
-  const [verifiedPin, setVerifiedPin] = useState("");
-  const [authorizer, setAuthorizer] = useState("");
+  // Delete is role-gated (manager/admin): managers get a
+  // two-step confirm in place of the button.
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  useEffect(() => {
+    setConfirmingDelete(false);
+  }, [selectedId]);
 
   const range = useMemo(() => {
     if (view === "month") {
@@ -250,7 +251,6 @@ export default function CalendarView({
     setFRoom("");
     setFNotes("");
     setFStatus("booked");
-    setGate(null);
     setFormOpen(true);
   }
 
@@ -274,7 +274,6 @@ export default function CalendarView({
     setFRoom(a.room ?? "");
     setFNotes(a.notes ?? "");
     setFStatus(a.status);
-    setGate(null);
     setFormOpen(true);
   }
 
@@ -296,7 +295,7 @@ export default function CalendarView({
     };
   }
 
-  async function doSave(pin?: string) {
+  async function doSave() {
     setSaving(true);
     setNotice("");
     try {
@@ -305,7 +304,6 @@ export default function CalendarView({
           user,
           editing.id,
           buildInput(),
-          pin ?? verifiedPin,
         );
         setAppts((prev) =>
           prev.map((a) => (a.id === updated.id ? updated : a)),
@@ -316,17 +314,10 @@ export default function CalendarView({
         setRefreshTick((t) => t + 1);
       }
       setFormOpen(false);
-      setGate(null);
     } catch (err) {
-      if (isPinRejection(err)) {
-        setVerifiedPin("");
-        setGate("save");
-        setPinError("That PIN was rejected — try again.");
-      } else {
-        setNotice(
-          err instanceof Error ? err.message : "Couldn't save the appointment.",
-        );
-      }
+      setNotice(
+        err instanceof Error ? err.message : "Couldn't save the appointment.",
+      );
     } finally {
       setSaving(false);
     }
@@ -338,50 +329,22 @@ export default function CalendarView({
     if (cat?.cattype === "appointment" && !fPatient)
       return setNotice("Pick a patient for this category.");
     if (!fDate || !fTime) return setNotice("Pick a date and start time.");
-    if (editing && !verifiedPin) {
-      setPinError("");
-      setPinEntry("");
-      setGate("save");
-      return;
-    }
     void doSave();
   }
 
-  async function doDelete(pin: string) {
+  async function doDelete() {
     if (!selected) return;
     try {
-      await deleteAppointment(user, selected.id, pin);
+      await deleteAppointment(user, selected.id);
       setAppts((prev) => prev.filter((a) => a.id !== selected.id));
       setSelectedId(null);
-      setGate(null);
+      setConfirmingDelete(false);
     } catch (err) {
-      if (isPinRejection(err)) {
-        setVerifiedPin("");
-        setPinError("That PIN was rejected — try again.");
-      } else {
-        setNotice("Couldn't delete the appointment.");
-      }
-    }
-  }
-
-  async function submitPin() {
-    const pin = pinEntry.trim();
-    if (!/^\d{4,8}$/.test(pin)) {
-      setPinError("PINs are 4–8 digits.");
-      return;
-    }
-    setPinChecking(true);
-    setPinError("");
-    try {
-      const manager = await verifyManagerPin(user, pin);
-      setVerifiedPin(pin);
-      setAuthorizer(manager.name);
-      if (gate === "save") void doSave(pin);
-      else if (gate === "delete") void doDelete(pin);
-    } catch {
-      setPinError("Incorrect PIN.");
-    } finally {
-      setPinChecking(false);
+      setNotice(
+        isRoleRejection(err)
+          ? "Deleting an appointment needs a manager or admin role."
+          : "Couldn't delete the appointment.",
+      );
     }
   }
 
@@ -748,73 +711,32 @@ export default function CalendarView({
                 >
                   Edit
                 </button>
-                <button
-                  className="btn btn-danger"
-                  onClick={() => {
-                    if (verifiedPin) void doDelete(verifiedPin);
-                    else {
-                      setPinError("");
-                      setPinEntry("");
-                      setGate("delete");
-                    }
-                  }}
-                >
-                  Delete
-                </button>
+                {isManager &&
+                  (confirmingDelete ? (
+                    <>
+                      <button
+                        className="btn btn-danger"
+                        onClick={() => void doDelete()}
+                      >
+                        Confirm delete
+                      </button>
+                      <button
+                        className="btn"
+                        onClick={() => setConfirmingDelete(false)}
+                      >
+                        Keep
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      className="btn btn-danger"
+                      onClick={() => setConfirmingDelete(true)}
+                    >
+                      Delete
+                    </button>
+                  ))}
               </div>
-              {authorizer && (
-                <p className="card-meta">
-                  Manager PIN verified for {authorizer} — edits and
-                  deletes this session skip the prompt.
-                </p>
-              )}
             </article>
-          )}
-
-          {gate && (
-            <form
-              className="pin-panel"
-              onSubmit={(e) => {
-                e.preventDefault();
-                void submitPin();
-              }}
-            >
-              <label>
-                Manager PIN required to{" "}
-                {gate === "save"
-                  ? "save changes to this appointment"
-                  : "delete this appointment"}
-                <input
-                  type="password"
-                  inputMode="numeric"
-                  autoComplete="off"
-                  value={pinEntry}
-                  onChange={(e) => setPinEntry(e.target.value)}
-                  placeholder="PIN"
-                />
-              </label>
-              <p>
-                Enter any active manager or admin PIN. The change is
-                recorded under that manager's name.
-              </p>
-              {pinError && <p className="pin-error">{pinError}</p>}
-              <div className="profile-actions">
-                <button
-                  className="btn btn-primary"
-                  type="submit"
-                  disabled={pinChecking}
-                >
-                  {pinChecking ? "Verifying…" : "Unlock"}
-                </button>
-                <button
-                  className="btn btn-secondary"
-                  type="button"
-                  onClick={() => setGate(null)}
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
           )}
 
           {formOpen && (

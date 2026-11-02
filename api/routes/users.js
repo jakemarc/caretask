@@ -5,18 +5,14 @@
 //   GET    /users/me         the signed-in user's own row, or null
 //   GET    /users/clinicians active users with authorized = true
 //                          (the assignable-provider list)
-//   POST   /users/verify-pin { pin } → { ok, manager } — UX check for
-//                          the dashboard's PIN prompt. This is NOT the
-//                          enforcement: gated writes re-check the PIN
-//                          in lib/requireManagerPin.js.
-//   POST   /users            create a staff member — MANAGER-GATED
-//   PUT    /users/:id        update a staff member — MANAGER-GATED
-//   DELETE /users/:id        deactivate (active = false) — MANAGER-GATED
-//   POST   /users/:id/restore reactivate — MANAGER-GATED
+//   POST   /users            create a staff member — ROLE-GATED
+//   PUT    /users/:id        update a staff member — ROLE-GATED
+//   DELETE /users/:id        deactivate (active = false) — ROLE-GATED
+//   POST   /users/:id/restore reactivate — ROLE-GATED
 //
-// Staff writes are manager-gated like patient edit/delete: managing
-// who is on the team is exactly the kind of change the override PIN
-// exists for. "Delete" is a deactivate, never a hard delete — the
+// Staff writes require a manager/admin ROLE (lib/requireRole.js).
+// Until 2026-11-02 they were gated by a manager PIN; Jake retired
+// the PIN in favor of role gates (DECISIONS.md). "Delete" is a deactivate, never a hard delete — the
 // row (and its audit history) stays, the person just stops being
 // active/assignable, and restore undoes it. Every gated write logs
 // an admin_action event naming the authorizing manager.
@@ -28,9 +24,10 @@
 // (lib/pin.js) before storage and never echoed back.
 const express = require('express');
 const pool = require('../db');
-const { findManagerByPin, hashPin, isPinFormat } = require('../lib/pin');
+const { hashPin, isPinFormat } = require('../lib/pin');
 const { insertEvent } = require('../lib/eventLog');
-const requireManagerPin = require('../lib/requireManagerPin');
+const { requireRole, attachManager } = require('../lib/requireRole');
+const requireManagerRole = requireRole('manager', 'admin');
 
 const router = express.Router();
 
@@ -74,24 +71,6 @@ router.get('/clinicians', async (req, res, next) => {
         WHERE authorized AND active ORDER BY lname, fname`,
     );
     res.json(rows);
-  } catch (err) {
-    next(err);
-  }
-});
-
-router.post('/verify-pin', async (req, res, next) => {
-  try {
-    const pin = req.body?.pin;
-    const manager = typeof pin === 'string' ? await findManagerByPin(pool, pin) : null;
-    if (!manager) {
-      return res.status(403).json({ ok: false, code: 'PIN_INVALID' });
-    }
-    const { rows } = await pool.query(
-      'SELECT fname, lname FROM users WHERE id = $1',
-      [manager.id],
-    );
-    const name = rows[0] ? `${rows[0].fname} ${rows[0].lname}` : manager.email;
-    res.json({ ok: true, manager: { id: manager.id, email: manager.email, role: manager.role, name } });
   } catch (err) {
     next(err);
   }
@@ -253,11 +232,10 @@ async function logStaffAction(client, req, action, target) {
 // Returns { pinHash } (possibly undefined = leave unchanged), or
 // { error } when a provided PIN is malformed.
 async function resolvePinHash(body) {
-  if (body.pin === undefined) return {};
-  if (typeof body.pin !== 'string' || !isPinFormat(body.pin)) {
-    return { error: 'pin must be 4-8 digits' };
-  }
-  return { pinHash: await hashPin(body.pin) };
+  // Manager PINs were retired on 2026-11-02 in favor of role gates
+  // (see lib/requireRole.js). A `pin` field on a staff write is
+  // ignored; pin_hash stays dormant in the schema.
+  return {};
 }
 
 function isUniqueViolation(err) {
@@ -270,7 +248,7 @@ const EMAIL_EXISTS = {
 };
 
 // POST /users — create a staff member. MANAGER-GATED.
-router.post('/', requireManagerPin, async (req, res, next) => {
+router.post('/', requireManagerRole, async (req, res, next) => {
   try {
     const fields = pickWritable(req.body ?? {});
     const error = validateUser(fields, { creating: true });
@@ -306,7 +284,7 @@ router.post('/', requireManagerPin, async (req, res, next) => {
 
 // PUT /users/:id — update a staff member (partial payloads fine).
 // MANAGER-GATED. Send `pin` to set/replace that member's PIN.
-router.put('/:id', requireManagerPin, async (req, res, next) => {
+router.put('/:id', requireManagerRole, async (req, res, next) => {
   try {
     const fields = pickWritable(req.body ?? {});
     const error = validateUser(fields, { creating: false });
@@ -353,7 +331,7 @@ router.put('/:id', requireManagerPin, async (req, res, next) => {
 // treat inactive as off the team, and so does the delete). A user
 // cannot deactivate their OWN account — someone else's manager PIN
 // session has to do it. MANAGER-GATED.
-router.delete('/:id', requireManagerPin, async (req, res, next) => {
+router.delete('/:id', requireManagerRole, async (req, res, next) => {
   try {
     const outcome = await withTransaction(async (client) => {
       const existing = await client.query(
@@ -387,7 +365,7 @@ router.delete('/:id', requireManagerPin, async (req, res, next) => {
 // POST /users/:id/restore — reactivate a deactivated staff member.
 // 404 when the member does not exist; 409 when already active.
 // MANAGER-GATED.
-router.post('/:id/restore', requireManagerPin, async (req, res, next) => {
+router.post('/:id/restore', requireManagerRole, async (req, res, next) => {
   try {
     const outcome = await withTransaction(async (client) => {
       const existing = await client.query(

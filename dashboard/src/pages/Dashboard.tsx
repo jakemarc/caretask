@@ -78,7 +78,7 @@ import {
   deletePatient,
   getPatient,
   isApiConfigured,
-  isPinRejection,
+  isRoleRejection,
   listEvents,
   listPatients,
   listMessages,
@@ -92,7 +92,6 @@ import {
   updatePatient,
   updateStaff,
   verifyChain,
-  verifyManagerPin,
   type ApiEvent,
   type ApiUser,
   type AuditEventName,
@@ -101,6 +100,7 @@ import {
   type StaffInput,
   type StaffRole,
 } from "../lib/patientApi";
+import { isManagerRole, useMyStaff } from "../lib/useMyRole";
 
 type Tab =
   | "dashboard"
@@ -583,23 +583,20 @@ export default function Dashboard({
     };
   }, [formFname, formLname, formDob, apiStatus, user, people]);
 
-  // Edit / Delete on the Patient Profile, gated by a manager PIN that
-  // the API verifies server-side (POST /users/verify-pin, then the PIN
-  // rides along on the write itself — PUT/DELETE reject without it).
-  // Clicking Edit or Delete opens the PIN panel first; a PIN the API
-  // accepts opens the edit form or the delete confirmation. The
-  // verified PIN is held in memory only, for this patient, and is
-  // cleared when the selection changes. If the API is unreachable the
-  // gate fails CLOSED: edits/deletes stay locked, because there is no
-  // server to check the PIN against.
-  const [pinGate, setPinGate] = useState<null | "edit" | "delete">(null);
-  const [pinEntry, setPinEntry] = useState("");
-  const [pinError, setPinError] = useState("");
-  const [pinChecking, setPinChecking] = useState(false);
-  const [managerPin, setManagerPin] = useState("");
-  const [authorizingManager, setAuthorizingManager] = useState("");
+  // Patient Profile actions under the role model (the manager
+  // PIN was retired on 2026-11-02): Edit is open to everyone —
+  // patient updates are not gated. Delete is a manager/admin act
+  // (the API role-gates the DELETE): managers get the Delete
+  // button plus a confirm step. Clinicians manage their list by
+  // STATUS instead — Put on hold / Discharge (and Return to
+  // active) take the patient off the active list without
+  // touching the record.
+  const me = useMyStaff(user);
+  const isManager = isManagerRole(me);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleteError, setDeleteError] = useState("");
+  const [statusSaving, setStatusSaving] = useState(false);
+  const [statusError, setStatusError] = useState("");
   const [editing, setEditing] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState("");
@@ -621,41 +618,29 @@ export default function Dashboard({
   const [editAgencyId, setEditAgencyId] = useState<number | null>(null);
   const [editAgencyText, setEditAgencyText] = useState("");
 
-  // Switching patients closes any open gate, form, or confirmation,
-  // and forgets the verified manager PIN.
+  // Switching patients closes any open form or confirmation.
   useEffect(() => {
-    setPinGate(null);
-    setPinEntry("");
-    setPinError("");
-    setManagerPin("");
-    setAuthorizingManager("");
     setConfirmingDelete(false);
     setDeleteError("");
+    setStatusError("");
     setEditing(false);
     setEditError("");
   }, [selectedId]);
 
   // Staff management on the Clinician tab, backed by the users
   // table (GET /users). Add / Edit / Deactivate / Reactivate are
-  // manager-gated exactly like patient edit/delete: the PIN is
-  // verified against the API, held in memory only while the
-  // Clinician tab is open, and rides along on each write, which the
-  // API re-checks server-side. "Delete" is a deactivate — the row
-  // and its history stay, and Reactivate undoes it. When the API is
-  // unreachable the tab falls back to the derived clinician list
-  // (staff stays null), because there is no server to check the PIN
-  // against — management fails closed, same as patient edits.
+  // role-gated (manager/admin) exactly like patient delete: the
+  // API checks the caller's role server-side, and this tab only
+  // offers the actions to managers. "Delete" is a deactivate —
+  // the row and its history stay, and Reactivate undoes it. When
+  // the API is unreachable the tab falls back to the derived
+  // clinician list (staff stays null) — management is unavailable
+  // either way.
   type StaffAction =
     | { kind: "add" }
     | { kind: "edit" | "deactivate" | "restore"; member: ApiUser }
     | { kind: "import"; candidates: ContactCandidate[] };
   const [staff, setStaff] = useState<ApiUser[] | null>(null);
-  const [staffGate, setStaffGate] = useState<StaffAction | null>(null);
-  const [staffPinEntry, setStaffPinEntry] = useState("");
-  const [staffPinError, setStaffPinError] = useState("");
-  const [staffPinChecking, setStaffPinChecking] = useState(false);
-  const [staffManagerPin, setStaffManagerPin] = useState("");
-  const [staffAuthorizer, setStaffAuthorizer] = useState("");
   const [staffNotice, setStaffNotice] = useState("");
   // Which staff card's "Patients" section is expanded (staff id),
   // or null when all are collapsed (Jake, 2026-10-30).
@@ -674,7 +659,6 @@ export default function Dashboard({
   const [sfTitle, setSfTitle] = useState("");
   const [sfSpecialty, setSfSpecialty] = useState("");
   const [sfPhoneCell, setSfPhoneCell] = useState("");
-  const [sfNewPin, setSfNewPin] = useState("");
   const [sfError, setSfError] = useState("");
   const [sfSaving, setSfSaving] = useState(false);
   const [confirmingDeactivate, setConfirmingDeactivate] =
@@ -682,20 +666,13 @@ export default function Dashboard({
   const [deactivateError, setDeactivateError] = useState("");
 
   // Load the staff directory when the Clinician tab opens; leaving
-  // the tab forgets the verified PIN and closes any open panel.
+  // the tab closes any open panel.
   useEffect(() => {
     if (tab === "contacts") {
       // Contacts is the real staff directory in read-only form —
-      // load the same users rows the Clinician tab uses. No PIN
-      // state lives on this page, and leaving the Clinician tab
-      // still forgets its verified PIN (same resets as below).
+      // load the same users rows the Clinician tab uses.
       // Unreachable API → staff stays null and the page says the
       // directory is unavailable.
-      setStaffGate(null);
-      setStaffPinEntry("");
-      setStaffPinError("");
-      setStaffManagerPin("");
-      setStaffAuthorizer("");
       setStaffNotice("");
       setStaffForm(null);
       setConfirmingDeactivate(null);
@@ -717,11 +694,6 @@ export default function Dashboard({
       };
     }
     if (tab !== "clinician") {
-      setStaffGate(null);
-      setStaffPinEntry("");
-      setStaffPinError("");
-      setStaffManagerPin("");
-      setStaffAuthorizer("");
       setStaffNotice("");
       setStaffForm(null);
       setConfirmingDeactivate(null);
@@ -765,13 +737,7 @@ export default function Dashboard({
     setStaffForm(null);
     setConfirmingDeactivate(null);
     setDeactivateError("");
-    if (staffManagerPin) {
-      proceedStaffAction(action);
-    } else {
-      setStaffGate(action);
-      setStaffPinEntry("");
-      setStaffPinError("");
-    }
+    proceedStaffAction(action);
   }
 
   function proceedStaffAction(action: StaffAction) {
@@ -789,52 +755,6 @@ export default function Dashboard({
     }
   }
 
-  async function submitStaffPin(e: React.FormEvent) {
-    e.preventDefault();
-    const pin = staffPinEntry.trim();
-    if (!/^\d{4,8}$/.test(pin)) {
-      setStaffPinError("Incorrect PIN");
-      return;
-    }
-    if (apiStatus !== "connected" || !user) {
-      setStaffPinError(
-        "Can't verify the PIN — the patient API is unreachable, so staff changes stay locked.",
-      );
-      return;
-    }
-    setStaffPinChecking(true);
-    setStaffPinError("");
-    try {
-      const manager = await verifyManagerPin(user, pin);
-      setStaffManagerPin(pin);
-      setStaffAuthorizer(manager.name);
-      const action = staffGate;
-      setStaffGate(null);
-      setStaffPinEntry("");
-      if (action) proceedStaffAction(action);
-    } catch (err) {
-      setStaffPinError(
-        isPinRejection(err)
-          ? "Incorrect PIN"
-          : "Couldn't verify the PIN — check the connection and try again.",
-      );
-    } finally {
-      setStaffPinChecking(false);
-    }
-  }
-
-  // A write the API refused over its PIN: forget the PIN and send
-  // the user back to the gate for the same action.
-  function bounceStaffToPinGate(action: StaffAction) {
-    setStaffManagerPin("");
-    setStaffAuthorizer("");
-    setStaffForm(null);
-    setConfirmingDeactivate(null);
-    setStaffGate(action);
-    setStaffPinEntry("");
-    setStaffPinError("That PIN was rejected by the server — try again.");
-  }
-
   function openStaffForm(member: ApiUser | null) {
     setSfFname(member?.fname ?? "");
     setSfMname(member?.mname ?? "");
@@ -847,7 +767,6 @@ export default function Dashboard({
     setSfTitle(member?.title ?? "");
     setSfSpecialty(member?.specialty ?? "");
     setSfPhoneCell(formatUSPhone(member?.phonecell ?? ""));
-    setSfNewPin("");
     setSfError("");
     setStaffForm({ member });
   }
@@ -855,11 +774,6 @@ export default function Dashboard({
   async function handleSaveStaff(e: React.FormEvent) {
     e.preventDefault();
     if (!user || !staffForm) return;
-    const newPin = sfNewPin.trim();
-    if (newPin && !/^\d{4,8}$/.test(newPin)) {
-      setSfError("The staff PIN must be 4–8 digits.");
-      return;
-    }
     const input: StaffInput = {
       fname: sfFname.trim(),
       mname: sfMname.trim() || null,
@@ -872,25 +786,22 @@ export default function Dashboard({
       title: sfTitle.trim() || null,
       specialty: sfSpecialty.trim() || null,
       phonecell: sfPhoneCell.trim() || null,
-      ...(newPin ? { pin: newPin } : {}),
     };
     const member = staffForm.member;
     setSfSaving(true);
     setSfError("");
     try {
       if (member) {
-        await updateStaff(user, member.id, input, staffManagerPin);
+        await updateStaff(user, member.id, input);
       } else {
-        await createStaff(user, input, staffManagerPin);
+        await createStaff(user, input);
       }
       setStaffForm(null);
       await refreshStaff();
     } catch (err) {
       const code = (err as { code?: string } | null)?.code;
-      if (isPinRejection(err)) {
-        bounceStaffToPinGate(
-          member ? { kind: "edit", member } : { kind: "add" },
-        );
+      if (isRoleRejection(err)) {
+        setSfError("Saving staff needs a manager or admin role.");
       } else if (code === "EMAIL_EXISTS") {
         setSfError("A staff member with that email already exists.");
       } else {
@@ -906,13 +817,15 @@ export default function Dashboard({
     const member = confirmingDeactivate;
     setDeactivateError("");
     try {
-      await deactivateStaff(user, member.id, staffManagerPin);
+      await deactivateStaff(user, member.id);
       setConfirmingDeactivate(null);
       await refreshStaff();
     } catch (err) {
       const code = (err as { code?: string } | null)?.code;
-      if (isPinRejection(err)) {
-        bounceStaffToPinGate({ kind: "deactivate", member });
+      if (isRoleRejection(err)) {
+        setDeactivateError(
+          "Deactivating staff needs a manager or admin role.",
+        );
       } else if (code === "SELF_DEACTIVATE") {
         setDeactivateError("You can't deactivate your own account.");
       } else {
@@ -927,11 +840,11 @@ export default function Dashboard({
     if (!user) return;
     setStaffNotice("");
     try {
-      await restoreStaff(user, member.id, staffManagerPin);
+      await restoreStaff(user, member.id);
       await refreshStaff();
     } catch (err) {
-      if (isPinRejection(err)) {
-        bounceStaffToPinGate({ kind: "restore", member });
+      if (isRoleRejection(err)) {
+        setStaffNotice("Reactivating staff needs a manager or admin role.");
       } else {
         setStaffNotice(
           "Couldn't reactivate — check the connection and try again.",
@@ -941,7 +854,7 @@ export default function Dashboard({
   }
 
   // Google Contacts staff import (prototype): create one users row
-  // per picked contact, through the same PIN-gated create as the
+  // per picked contact, through the same role-gated create as the
   // form. Contacts without an email can't become staff (email is
   // the identity) and contacts whose email already exists are
   // skipped as duplicates — both are counted in the summary, never
@@ -981,13 +894,15 @@ export default function Dashboard({
         authorized: false,
       };
       try {
-        await createStaff(user, input, staffManagerPin);
+        await createStaff(user, input);
         existing.add(email);
         created += 1;
       } catch (err) {
         const code = (err as { code?: string } | null)?.code;
-        if (isPinRejection(err)) {
-          bounceStaffToPinGate({ kind: "import", candidates });
+        if (isRoleRejection(err)) {
+          setStaffNotice(
+            "Importing staff needs a manager or admin role — import stopped.",
+          );
           return;
         }
         if (code === "EMAIL_EXISTS") duplicates += 1;
@@ -1000,29 +915,6 @@ export default function Dashboard({
     if (skipped) parts.push(`${skipped} skipped (no email)`);
     if (failed) parts.push(`${failed} failed`);
     setStaffNotice(parts.join(" · ") + ".");
-  }
-
-  function staffGateLabel(kind: StaffAction["kind"]): string {
-    switch (kind) {
-      case "add":
-        return "add a staff member";
-      case "edit":
-        return "edit this staff member";
-      case "deactivate":
-        return "deactivate this staff member";
-      case "restore":
-        return "reactivate this staff member";
-      case "import":
-        return "import staff from Google Contacts";
-    }
-  }
-
-  function openPinGate(action: "edit" | "delete") {
-    setPinGate(action);
-    setPinEntry("");
-    setPinError("");
-    setConfirmingDelete(false);
-    setDeleteError("");
   }
 
   function startEdit() {
@@ -1052,41 +944,6 @@ export default function Dashboard({
     setEditAgencyText(p.agencyNameText ?? "");
     setEditError("");
     setEditing(true);
-  }
-
-  async function submitPin(e: React.FormEvent) {
-    e.preventDefault();
-    const pin = pinEntry.trim();
-    if (!/^\d{4,8}$/.test(pin)) {
-      setPinError("Incorrect PIN");
-      return;
-    }
-    if (apiStatus !== "connected") {
-      setPinError(
-        "Can't verify the PIN — the patient API is unreachable, so edits and deletes stay locked.",
-      );
-      return;
-    }
-    setPinChecking(true);
-    setPinError("");
-    try {
-      const manager = await verifyManagerPin(user, pin);
-      setManagerPin(pin);
-      setAuthorizingManager(manager.name);
-      const action = pinGate;
-      setPinGate(null);
-      setPinEntry("");
-      if (action === "edit") startEdit();
-      else if (action === "delete") setConfirmingDelete(true);
-    } catch (err) {
-      setPinError(
-        isPinRejection(err)
-          ? "Incorrect PIN"
-          : "Couldn't verify the PIN — check the connection and try again.",
-      );
-    } finally {
-      setPinChecking(false);
-    }
   }
 
   async function handleSaveEdit(e: React.FormEvent) {
@@ -1133,7 +990,6 @@ export default function Dashboard({
           user,
           selectedPerson.id,
           payload,
-          managerPin,
         );
         setPeople((prev) =>
           prev.map((p) => (p.id === updated.id ? updated : p)),
@@ -1177,21 +1033,10 @@ export default function Dashboard({
         );
       }
       setEditing(false);
-    } catch (err) {
-      if (isPinRejection(err)) {
-        // The server refused the override (PIN changed, manager
-        // deactivated, …). Back to the PIN prompt rather than a
-        // generic failure.
-        setEditing(false);
-        setManagerPin("");
-        setAuthorizingManager("");
-        openPinGate("edit");
-        setPinError("That PIN was rejected by the server — try again.");
-      } else {
-        setEditError(
-          "Save failed — the change was not applied. Check the connection and try again.",
-        );
-      }
+    } catch {
+      setEditError(
+        "Save failed — the change was not applied. Check the connection and try again.",
+      );
     } finally {
       setEditSaving(false);
     }
@@ -1202,20 +1047,14 @@ export default function Dashboard({
     setDeleteError("");
     try {
       if (apiStatus === "connected") {
-        await deletePatient(user, id, managerPin);
+        await deletePatient(user, id);
       }
     } catch (err) {
-      if (isPinRejection(err)) {
-        setConfirmingDelete(false);
-        setManagerPin("");
-        setAuthorizingManager("");
-        openPinGate("delete");
-        setPinError("That PIN was rejected by the server — try again.");
-      } else {
-        setDeleteError(
-          "Delete failed — the record was not removed. Check the connection and try again.",
-        );
-      }
+      setDeleteError(
+        isRoleRejection(err)
+          ? "Deleting a patient needs a manager or admin role."
+          : "Delete failed — the record was not removed. Check the connection and try again.",
+      );
       return;
     }
     const remaining = people.filter((p) => p.id !== id);
@@ -1223,6 +1062,35 @@ export default function Dashboard({
     setConfirmingDelete(false);
     setSelectedId(remaining[0]?.id ?? "");
     setTab("list");
+  }
+
+  // Clinician list management: move a patient off (or back onto)
+  // the active list by STATUS — no delete, no gate. Connected
+  // mode writes through the API; demo mode updates local state.
+  async function handleSetPatientStatus(status: PatientStatus) {
+    const id = selectedPerson.id;
+    setStatusSaving(true);
+    setStatusError("");
+    try {
+      if (apiStatus === "connected") {
+        const updated = await updatePatient(user, id, { status });
+        setPeople((prev) =>
+          prev.map((p) => (p.id === updated.id ? updated : p)),
+        );
+      } else {
+        setPeople((prev) =>
+          prev.map((p) =>
+            p.id === id ? { ...p, patientStatus: status } : p,
+          ),
+        );
+      }
+    } catch {
+      setStatusError(
+        "Couldn't change the status — check the connection and try again.",
+      );
+    } finally {
+      setStatusSaving(false);
+    }
   }
   // Audit Log view state. Filters persist while the dashboard is
   // open; the list reloads when the view opens, when filters are
@@ -2167,26 +2035,28 @@ export default function Dashboard({
               </div>
               <p className="section-note">
                 Staff directory from the users table — everyone on the
-                team. Adding, editing, and deactivating staff takes a
-                manager PIN. Deactivating keeps the record and its
-                history, and Reactivate can undo it.
+                team. Adding, editing, and deactivating staff is
+                limited to managers and admins. Deactivating keeps the
+                record and its history, and Reactivate can undo it.
               </p>
-              <div className="profile-actions">
-                <button
-                  className="btn btn-primary"
-                  type="button"
-                  onClick={() => requestStaffAction({ kind: "add" })}
-                >
-                  Add clinician
-                </button>
-                <button
-                  className="btn btn-secondary"
-                  type="button"
-                  onClick={() => setShowStaffImport((v) => !v)}
-                >
-                  Import from Google Contacts
-                </button>
-              </div>
+              {isManager && (
+                <div className="profile-actions">
+                  <button
+                    className="btn btn-primary"
+                    type="button"
+                    onClick={() => requestStaffAction({ kind: "add" })}
+                  >
+                    Add clinician
+                  </button>
+                  <button
+                    className="btn btn-secondary"
+                    type="button"
+                    onClick={() => setShowStaffImport((v) => !v)}
+                  >
+                    Import from Google Contacts
+                  </button>
+                </div>
+              )}
               {showStaffImport && (
                 <GoogleContactPicker
                   mode="multi"
@@ -2201,40 +2071,6 @@ export default function Dashboard({
                 />
               )}
               {staffNotice && <p className="pin-error">{staffNotice}</p>}
-              {staffGate && (
-                <form className="pin-panel" onSubmit={submitStaffPin}>
-                  <label>
-                    Manager PIN required to {staffGateLabel(staffGate.kind)}
-                    <input
-                      type="password"
-                      inputMode="numeric"
-                      autoComplete="off"
-                      value={staffPinEntry}
-                      onChange={(e) => setStaffPinEntry(e.target.value)}
-                      placeholder="PIN"
-                    />
-                  </label>
-                  {staffPinError && (
-                    <p className="pin-error">{staffPinError}</p>
-                  )}
-                  <div className="profile-actions">
-                    <button
-                      className="btn btn-primary"
-                      type="submit"
-                      disabled={staffPinChecking}
-                    >
-                      {staffPinChecking ? "Verifying…" : "Unlock"}
-                    </button>
-                    <button
-                      className="btn btn-secondary"
-                      type="button"
-                      onClick={() => setStaffGate(null)}
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </form>
-              )}
               {confirmingDeactivate && (
                 <div className="pin-panel">
                   <p>
@@ -2243,9 +2079,6 @@ export default function Dashboard({
                     and assignable, but the record and its history are
                     kept, and Reactivate can undo this.
                   </p>
-                  {staffAuthorizer && (
-                    <p>Authorized by {staffAuthorizer} (manager PIN).</p>
-                  )}
                   {deactivateError && (
                     <p className="pin-error">{deactivateError}</p>
                   )}
@@ -2388,21 +2221,6 @@ export default function Dashboard({
                     />
                     Authorized — can be assigned patients
                   </label>
-                  <label>
-                    Override PIN for this person (optional)
-                    <input
-                      type="password"
-                      inputMode="numeric"
-                      autoComplete="off"
-                      value={sfNewPin}
-                      onChange={(e) => setSfNewPin(e.target.value)}
-                      placeholder={
-                        staffForm.member
-                          ? "Leave blank to keep the current PIN"
-                          : "Only used if their role is manager or admin"
-                      }
-                    />
-                  </label>
                   {sfError && <p className="pin-error">{sfError}</p>}
                   <div className="profile-actions">
                     <button
@@ -2516,41 +2334,45 @@ export default function Dashboard({
                         </p>
                       )}
                       <div className="profile-actions">
-                        <button
-                          className="btn btn-secondary"
-                          type="button"
-                          onClick={() =>
-                            requestStaffAction({ kind: "edit", member: m })
-                          }
-                        >
-                          Edit
-                        </button>
-                        {m.active ? (
-                          <button
-                            className="btn btn-danger"
-                            type="button"
-                            onClick={() =>
-                              requestStaffAction({
-                                kind: "deactivate",
-                                member: m,
-                              })
-                            }
-                          >
-                            Deactivate
-                          </button>
-                        ) : (
-                          <button
-                            className="btn btn-secondary"
-                            type="button"
-                            onClick={() =>
-                              requestStaffAction({
-                                kind: "restore",
-                                member: m,
-                              })
-                            }
-                          >
-                            Reactivate
-                          </button>
+                        {isManager && (
+                          <>
+                            <button
+                              className="btn btn-secondary"
+                              type="button"
+                              onClick={() =>
+                                requestStaffAction({ kind: "edit", member: m })
+                              }
+                            >
+                              Edit
+                            </button>
+                            {m.active ? (
+                              <button
+                                className="btn btn-danger"
+                                type="button"
+                                onClick={() =>
+                                  requestStaffAction({
+                                    kind: "deactivate",
+                                    member: m,
+                                  })
+                                }
+                              >
+                                Deactivate
+                              </button>
+                            ) : (
+                              <button
+                                className="btn btn-secondary"
+                                type="button"
+                                onClick={() =>
+                                  requestStaffAction({
+                                    kind: "restore",
+                                    member: m,
+                                  })
+                                }
+                              >
+                                Reactivate
+                              </button>
+                            )}
+                          </>
                         )}
                         {m.active && (
                           <button
@@ -3027,8 +2849,7 @@ export default function Dashboard({
                       aria-label="Edit patient"
                       title="Edit patient"
                       onClick={() => {
-                        if (!pinGate && !editing && !confirmingDelete)
-                          openPinGate("edit");
+                        if (!editing && !confirmingDelete) startEdit();
                       }}
                     >
                       <Pencil size={20} />
@@ -3042,8 +2863,7 @@ export default function Dashboard({
                   role="button"
                   title="Tap to edit"
                   onClick={() => {
-                    if (!pinGate && !editing && !confirmingDelete)
-                      openPinGate("edit");
+                    if (!editing && !confirmingDelete) startEdit();
                   }}
                 >
                   <span className="avatar-circle">
@@ -3064,11 +2884,11 @@ export default function Dashboard({
                   </div>
                   {/* Visible Edit button (Jake, 2026-10-30): the
                       header tap alone wasn't discoverable. Same
-                      flow as the header tap — PIN gate → Edit
-                      form — and hidden while any of those are
-                      already open (same guards). Icon-only
-                      (Pencil) since 2026-10-31, per Jake. */}
-                  {!pinGate && !editing && !confirmingDelete && (
+                      flow as the header tap — opens the Edit form
+                      directly — and hidden while the form or the
+                      delete confirm is already open (same guards).
+                      Icon-only (Pencil) since 2026-10-31, per Jake. */}
+                  {!editing && !confirmingDelete && (
                     <button
                       type="button"
                       className="btn btn-secondary profile-edit-btn"
@@ -3076,7 +2896,7 @@ export default function Dashboard({
                       aria-label="Edit patient"
                       onClick={(e) => {
                         e.stopPropagation();
-                        openPinGate("edit");
+                        startEdit();
                       }}
                     >
                       <Pencil size={17} />
@@ -3099,39 +2919,6 @@ export default function Dashboard({
                         : "Active"
                   }
                 />
-                {pinGate && (
-                  <form className="pin-panel" onSubmit={submitPin}>
-                    <label>
-                      Manager PIN required to{" "}
-                      {pinGate === "edit" ? "edit" : "delete"} this patient
-                      <input
-                        type="password"
-                        inputMode="numeric"
-                        autoComplete="off"
-                        value={pinEntry}
-                        onChange={(e) => setPinEntry(e.target.value)}
-                        placeholder="PIN"
-                      />
-                    </label>
-                    {pinError && <p className="pin-error">{pinError}</p>}
-                    <div className="profile-actions">
-                      <button
-                        className="btn btn-primary"
-                        type="submit"
-                        disabled={pinChecking}
-                      >
-                        {pinChecking ? "Verifying…" : "Unlock"}
-                      </button>
-                      <button
-                        className="btn btn-secondary"
-                        type="button"
-                        onClick={() => setPinGate(null)}
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </form>
-                )}
                 {confirmingDelete && (
                   <div className="pin-panel">
                     <p>
@@ -3139,9 +2926,6 @@ export default function Dashboard({
                       — the record and its audit history are kept, and it
                       can be restored.
                     </p>
-                    {authorizingManager && (
-                      <p>Authorized by {authorizingManager} (manager PIN).</p>
-                    )}
                     {deleteError && <p className="pin-error">{deleteError}</p>}
                     <div className="profile-actions">
                       <button
@@ -3338,16 +3122,18 @@ export default function Dashboard({
                       >
                         {editSaving ? "Saving…" : "Save changes"}
                       </button>
-                      <button
-                        className="btn btn-danger"
-                        type="button"
-                        onClick={() => {
-                          setEditing(false);
-                          setConfirmingDelete(true);
-                        }}
-                      >
-                        Delete patient
-                      </button>
+                      {isManager && (
+                        <button
+                          className="btn btn-danger"
+                          type="button"
+                          onClick={() => {
+                            setEditing(false);
+                            setConfirmingDelete(true);
+                          }}
+                        >
+                          Delete patient
+                        </button>
+                      )}
                       <button
                         className="btn btn-secondary"
                         type="button"
@@ -3360,6 +3146,50 @@ export default function Dashboard({
                 )}
                 {!editing && (
                   <>
+                <h3>Manage list</h3>
+                <p className="section-note">
+                  Patients on hold or discharged leave the active
+                  list — the record itself stays on file. Deleting a
+                  record outright is a manager action.
+                </p>
+                <div className="profile-actions">
+                  {(selectedPerson.patientStatus ?? "active") !==
+                    "hold" && (
+                    <button
+                      className="btn btn-secondary"
+                      type="button"
+                      disabled={statusSaving}
+                      onClick={() => void handleSetPatientStatus("hold")}
+                    >
+                      Put on hold
+                    </button>
+                  )}
+                  {(selectedPerson.patientStatus ?? "active") !==
+                    "discharged" && (
+                    <button
+                      className="btn btn-secondary"
+                      type="button"
+                      disabled={statusSaving}
+                      onClick={() =>
+                        void handleSetPatientStatus("discharged")
+                      }
+                    >
+                      Discharge
+                    </button>
+                  )}
+                  {(selectedPerson.patientStatus ?? "active") !==
+                    "active" && (
+                    <button
+                      className="btn btn-secondary"
+                      type="button"
+                      disabled={statusSaving}
+                      onClick={() => void handleSetPatientStatus("active")}
+                    >
+                      Return to active
+                    </button>
+                  )}
+                </div>
+                {statusError && <p className="pin-error">{statusError}</p>}
                 <h3>Contact</h3>
                 <div className="profile-details">
                   <div>

@@ -20,7 +20,8 @@
 const express = require('express');
 const pool = require('../db');
 const { insertEvent } = require('../lib/eventLog');
-const requireManagerPin = require('../lib/requireManagerPin');
+const { requireRole, attachManager } = require('../lib/requireRole');
+const requireManagerRole = requireRole('manager', 'admin');
 const { routeLeg } = require('../lib/routing');
 
 const router = express.Router();
@@ -360,13 +361,17 @@ router.post('/expense-reports/:id/submit', async (req, res, next) => {
   }
 });
 
-// Manager steps — PIN-gated; the PIN owner is recorded.
-router.post('/expense-reports/:id/approve', requireManagerPin, async (req, res, next) => {
+// Manager steps — role-gated (manager/admin); the acting manager
+// is recorded, and a manager cannot process their OWN report.
+router.post('/expense-reports/:id/approve', requireManagerRole, async (req, res, next) => {
   try {
     await resolveMe(pool, req);
     const report = await fetchReport(pool, req.params.id);
     if (!report || report.deleted_at) {
       throw httpError(404, 'expense report not found', 'REPORT_NOT_FOUND');
+    }
+    if (Number(report.user_id) === Number(req.manager.id)) {
+      throw httpError(403, 'managers cannot process their own expense reports', 'SELF_APPROVAL');
     }
     if (report.status !== 'submitted') {
       throw httpError(409, 'only a submitted report can be approved', 'REPORT_NOT_SUBMITTED');
@@ -387,12 +392,15 @@ router.post('/expense-reports/:id/approve', requireManagerPin, async (req, res, 
   }
 });
 
-router.post('/expense-reports/:id/reject', requireManagerPin, async (req, res, next) => {
+router.post('/expense-reports/:id/reject', requireManagerRole, async (req, res, next) => {
   try {
     await resolveMe(pool, req);
     const report = await fetchReport(pool, req.params.id);
     if (!report || report.deleted_at) {
       throw httpError(404, 'expense report not found', 'REPORT_NOT_FOUND');
+    }
+    if (Number(report.user_id) === Number(req.manager.id)) {
+      throw httpError(403, 'managers cannot process their own expense reports', 'SELF_APPROVAL');
     }
     if (report.status !== 'submitted') {
       throw httpError(409, 'only a submitted report can be rejected', 'REPORT_NOT_SUBMITTED');
@@ -414,12 +422,15 @@ router.post('/expense-reports/:id/reject', requireManagerPin, async (req, res, n
   }
 });
 
-router.post('/expense-reports/:id/pay', requireManagerPin, async (req, res, next) => {
+router.post('/expense-reports/:id/pay', requireManagerRole, async (req, res, next) => {
   try {
     await resolveMe(pool, req);
     const report = await fetchReport(pool, req.params.id);
     if (!report || report.deleted_at) {
       throw httpError(404, 'expense report not found', 'REPORT_NOT_FOUND');
+    }
+    if (Number(report.user_id) === Number(req.manager.id)) {
+      throw httpError(403, 'managers cannot process their own expense reports', 'SELF_APPROVAL');
     }
     if (report.status !== 'approved') {
       throw httpError(409, 'only an approved report can be marked paid', 'REPORT_NOT_APPROVED');

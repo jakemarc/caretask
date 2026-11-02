@@ -138,13 +138,20 @@ line when the patient has an agency — see the Agency picker
 note); Contact shows the full
 address (tap/click → free Google Maps directions link,
 coordinates when stored) and home/cell phones (tap-to-call
-`tel:` links). Tapping the profile header opens the manager-PIN
-gate into the Edit form, which carries both Save changes and
-Delete patient (one verified PIN covers both); a **visible
-"Edit patient" button** on the profile head triggers the same
-flow (restored 2026-10-30 — the header tap alone wasn't
-discoverable; the button hides while the PIN gate, Edit form,
-or delete confirm is open). The button is **icon-only (a
+`tel:` links). Tapping the profile header opens the Edit form
+directly (since 2026-11-02 — the manager-PIN gate in front of it
+was retired with the PIN system); a **visible "Edit patient"
+button** (Pencil) on the profile head triggers the same flow
+(restored 2026-10-30 — the header tap alone wasn't discoverable;
+the button hides while the Edit form or delete confirm is open).
+The Edit form carries Save changes for everyone and a **Delete
+patient button only for managers/admins** (role-gated; the API
+enforces it). The read-only profile also carries a **"Manage
+list" block** (2026-11-02, Jake): Put on hold / Discharge /
+Return to active, shown per the patient's current status and
+available to every clinician — removing someone from your active
+list is a status change, not a delete. Status is a property of
+the shared patient record, not per-clinician. The button is **icon-only (a
 Pencil) since 2026-10-31** — `title`/`aria-label` keep the
 "Edit patient" name; the Edit form's own "Edit patient"
 heading is unchanged. On the **Add Patient form, Date of
@@ -227,17 +234,25 @@ restrictions, not by secrecy).
 - **API-optional shell**: if the API is unreachable, patient views
   fall back to the on-screen demo list and a banner says so; the
   Clinician tab falls back to a read-only derived view. Anything
-  PIN-gated fails CLOSED (no verification possible → no edits).
+  Role-gated controls fail CLOSED (role unknown → treated as
+  non-manager, so manager-only controls stay hidden).
   Since deploy-20 (2026-11-02) the sign-in check retries once
   after ~1.5s before this fallback verdict — a single failed
   first attempt no longer brands the session.
-- **Manager PIN flow**: Edit/Delete patient and all staff writes ask
-  for a PIN, verify it via `POST /users/verify-pin`, keep the
-  verified PIN in component memory only (patient scope: per patient;
-  staff scope: while the Clinician tab is open), and send it as the
-  `X-Manager-Pin` header. A 403 PIN rejection bounces the user back
-  to the PIN panel. There is NO client-side PIN constant — the old
-  `managerPin.ts` was deleted when the server-side system shipped.
+- **Role gates (2026-11-02, replacing the manager-PIN flow)**:
+  the dashboard fetches the caller's own staff record once per
+  sign-in (`GET /users/me`, `useMyRole` hook, cached per user).
+  Manager/admin accounts see the gated controls (patient Delete,
+  staff Add/Edit/Deactivate, category editing, agency sync/local
+  edits, document Delete, expense review); everyone else gets
+  read-only views with a short explanation line. Edits that used
+  to sit behind the PIN (patient Edit, appointment save) now open
+  directly for all clinicians. API role rejections
+  (`ROLE_REQUIRED` / `NO_STAFF_RECORD`) surface as "That action
+  needs a manager or admin role."; `SELF_APPROVAL` on expenses
+  surfaces as "You can't process your own report — another
+  manager needs to do this one." There is no PIN anywhere in the
+  client anymore.
 - **Clinician (staff) cards**: layout top to bottom — a header
   row with a text avatar (`.avatar-circle`, initials from first +
   last name) beside the FULL name (first + middle + last +
@@ -254,8 +269,9 @@ restrictions, not by secrecy).
   (cell first, then phone; both when both exist; US-formatted and
   tap-to-call; omitted when no phone is on file). There is NO
   status line on the card — active status shows in the avatar
-  color (authorized / PIN-set live in the record and edit form);
-  Edit / Deactivate / Reactivate go through the PIN flow above.
+  color (authorized status lives in the record and edit form);
+  Edit / Deactivate / Reactivate are manager/admin-only (the
+  role gates above).
   The staff Add/Edit form carries a **Suffix / Credential**
   dropdown directly after the name fields — a list of common
   medical credentials (`STAFF_CREDENTIALS` in patientApi.ts:

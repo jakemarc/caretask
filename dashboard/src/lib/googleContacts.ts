@@ -15,7 +15,7 @@
 //   the caller, which decides what a pick means: the Add Patient form
 //   pre-fills (clinician reviews, duplicate check runs, Save is the
 //   normal path), and the Clinician tab creates staff records through
-//   the existing manager-PIN-gated API. This module never writes
+//   the existing role-gated API. This module never writes
 //   anywhere itself.
 // - When VITE_GOOGLE_OAUTH_CLIENT_ID is not configured, the picker
 //   offers SAMPLE contacts (fictional, Person-shaped) so the whole

@@ -41,7 +41,8 @@
 const express = require('express');
 const pool = require('../db');
 const { insertEvent } = require('../lib/eventLog');
-const requireManagerPin = require('../lib/requireManagerPin');
+const { requireRole, attachManager } = require('../lib/requireRole');
+const requireManagerRole = requireRole('manager', 'admin');
 const { computeDisplayName } = require('./agencies');
 
 const router = express.Router();
@@ -502,7 +503,7 @@ router.post('/', async (req, res, next) => {
 
 // PUT /patients/:id — update only the whitelisted fields provided.
 // Audit: update entry, before the pre-update row, after the new row.
-router.put('/:id', requireManagerPin, async (req, res, next) => {
+router.put('/:id', attachManager, async (req, res, next) => {
   try {
     const fields = pickWritable(req.body);
     const error = validatePatient(fields);
@@ -565,7 +566,7 @@ router.put('/:id', requireManagerPin, async (req, res, next) => {
 // Audit: soft_delete entry, before the active row, after the row with
 // deleted_at set. Deleting an already-deleted patient is a 404: the
 // reads treat it as gone, and so does the delete.
-router.delete('/:id', requireManagerPin, async (req, res, next) => {
+router.delete('/:id', requireManagerRole, async (req, res, next) => {
   try {
     const deleted = await withTransaction(async (client) => {
       const existing = await client.query(
@@ -611,7 +612,7 @@ router.delete('/:id', requireManagerPin, async (req, res, next) => {
 // POST /patients/:id/restore — undo a soft delete: clears deleted_at.
 // 404 when no patient with that id exists; 409 when the patient is
 // already active (there is nothing to restore).
-router.post('/:id/restore', requireManagerPin, async (req, res, next) => {
+router.post('/:id/restore', requireManagerRole, async (req, res, next) => {
   try {
     const restored = await withTransaction(async (client) => {
       const existing = await client.query(

@@ -1,19 +1,21 @@
-// End-to-end test harness for the users table + manager PIN override
-// (CareTask demo API) — LOCAL TEST ONLY.
+// End-to-end test harness for the users table + the ROLE gates
+// that replaced the manager PIN on 2026-11-02 (CareTask demo API) —
+// LOCAL TEST ONLY.
 //
 // What it proves, against a REAL Postgres (schema.sql,
 // schema-events.sql, schema-patients-v2.sql, AND schema-users.sql
 // applied):
 //   users directory endpoints (list / me / clinicians) never expose
 //   pin_hash; the role and lowercase-email CHECKs reject bad rows at
-//   the database level; patient PUT / DELETE / restore are gated by a
-//   manager PIN checked SERVER-side — missing PIN → 403 PIN_REQUIRED,
-//   wrong PIN → 403 PIN_INVALID, a PIN belonging to an INACTIVE
-//   manager → 403, a valid manager OR admin PIN → the write succeeds;
-//   each successful override writes an admin_action event naming the
-//   manager whose PIN was used; POST /users/verify-pin agrees with
-//   the gate; the scrypt hash/verify roundtrip works and rejects a
-//   wrong PIN.
+//   the database level; patient PUT is NOT gated (clinicians edit
+//   their own patients; a stray PIN header is ignored) while DELETE
+//   / restore require the CALLER to be an active manager/admin —
+//   no staff row → 403 NO_STAFF_RECORD, clinician → 403
+//   ROLE_REQUIRED, manager → the write succeeds; each patient
+//   update writes an admin_action event naming the editing actor;
+//   POST /users/verify-pin is retired (404); the scrypt hash/verify
+//   roundtrip in lib/pin.js (still used by the seed script) works
+//   and rejects a wrong PIN.
 //
 // Same stub-auth caveat as e2e-test.js: req.user is injected, the real
 // Firebase path is a deploy-time check.
@@ -72,7 +74,10 @@ async function main() {
   });
 
   try {
-    // Setup staff.
+    // Setup staff. Other suites share this database and may have
+    // left a tester@example.com row; this suite's actor must start
+    // with NO staff row.
+    await pool.query("DELETE FROM users WHERE email = 'tester@example.com'");
     await upsertUser({ email: 'mgr@example.com', role: 'manager', authorized: false, fname: 'Manny', lname: 'Manager', pin: MANAGER_PIN });
     await upsertUser({ email: 'adm@example.com', role: 'admin', authorized: true, fname: 'Ada', lname: 'Admin', pin: ADMIN_PIN });
     await upsertUser({ email: 'gone@example.com', role: 'manager', authorized: false, fname: 'Ina', lname: 'Ctive', pin: INACTIVE_PIN, active: false });
@@ -136,69 +141,63 @@ async function main() {
       }),
     });
     const patient = await res.json();
-    check('patient created (create is not PIN gated)', res.status === 201, `got ${res.status}`);
+    check('patient created (create is not gated)', res.status === 201, `got ${res.status}`);
     const id = patient.id;
 
-    // 5. PUT gate.
-    console.log('4. PUT /patients/:id PIN gate');
+    // 5. PUT is NOT gated (the PIN was retired on 2026-11-02;
+    // clinicians manage their own patients).
+    console.log('4. PUT /patients/:id (ungated)');
     const put = (headers) =>
       fetch(`${BASE}/patients/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', ...headers },
-        body: JSON.stringify({ notes: 'via override' }),
+        body: JSON.stringify({ notes: 'clinician edit' }),
       });
     res = await put({});
-    let body = await res.json();
-    check('PUT without PIN is 403 PIN_REQUIRED', res.status === 403 && body.code === 'PIN_REQUIRED', `got ${res.status}/${body.code}`);
+    check('PUT with no staff row succeeds', res.status === 200, `got ${res.status}`);
     res = await put({ 'X-Manager-Pin': '0000' });
-    body = await res.json();
-    check('PUT with wrong PIN is 403 PIN_INVALID', res.status === 403 && body.code === 'PIN_INVALID', `got ${res.status}/${body.code}`);
-    res = await put({ 'X-Manager-Pin': INACTIVE_PIN });
-    body = await res.json();
-    check('PUT with inactive manager PIN is 403 PIN_INVALID', res.status === 403 && body.code === 'PIN_INVALID', `got ${res.status}/${body.code}`);
-    res = await put({ 'X-Manager-Pin': MANAGER_PIN });
-    check('PUT with manager PIN succeeds', res.status === 200, `got ${res.status}`);
-    res = await put({ 'X-Manager-Pin': ADMIN_PIN });
-    check('PUT with admin PIN succeeds', res.status === 200, `got ${res.status}`);
+    check('PUT ignores a stray PIN header', res.status === 200, `got ${res.status}`);
 
-    // 6. Override attribution in the event log.
-    console.log('5. override attribution');
+    // 6. Attribution in the event log.
+    console.log('5. update attribution');
     res = await fetch(`${BASE}/events?event=admin_action&patient_id=${id}`);
     const events = await res.json();
     const updates = events.filter((e) => e.details?.action === 'patient_update');
     check('two patient_update admin_action events logged', updates.length === 2, `got ${updates.length}`);
     check(
-      'events name the authorizing managers',
-      updates.some((e) => e.details.manager_email === 'mgr@example.com') &&
-        updates.some((e) => e.details.manager_email === 'adm@example.com'),
+      'events name the editing actor',
+      updates.every((e) => e.details.manager_email === 'tester@example.com'),
     );
 
-    // 7. verify-pin endpoint agrees with the gate.
-    console.log('6. POST /users/verify-pin');
+    // 7. verify-pin endpoint is retired with the PIN.
+    console.log('6. POST /users/verify-pin (retired)');
     res = await fetch(`${BASE}/users/verify-pin`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ pin: MANAGER_PIN }),
     });
-    body = await res.json();
-    check('verify-pin accepts manager PIN + names the manager', res.status === 200 && body.ok === true && body.manager?.name === 'Manny Manager', `got ${res.status}`);
-    res = await fetch(`${BASE}/users/verify-pin`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin: '0000' }),
-    });
-    check('verify-pin rejects wrong PIN', res.status === 403, `got ${res.status}`);
+    check('verify-pin is gone (404)', res.status === 404, `got ${res.status}`);
 
-    // 8. DELETE + restore gates.
-    console.log('7. DELETE / restore PIN gates');
+    // 8. DELETE + restore are gated by the CALLER's role.
+    console.log('7. DELETE / restore role gates');
+    let body;
     res = await fetch(`${BASE}/patients/${id}`, { method: 'DELETE' });
-    check('DELETE without PIN is 403', res.status === 403, `got ${res.status}`);
-    res = await fetch(`${BASE}/patients/${id}`, { method: 'DELETE', headers: { 'X-Manager-Pin': MANAGER_PIN } });
-    check('DELETE with manager PIN is 204', res.status === 204, `got ${res.status}`);
+    body = await res.json();
+    check('DELETE with no staff row is 403 NO_STAFF_RECORD', res.status === 403 && body.code === 'NO_STAFF_RECORD', `got ${res.status}/${body.code}`);
+    await upsertUser({ email: 'tester@example.com', role: 'clinician', authorized: true, fname: 'Test', lname: 'Caller' });
+    res = await fetch(`${BASE}/patients/${id}`, { method: 'DELETE' });
+    body = await res.json();
+    check('DELETE as clinician is 403 ROLE_REQUIRED', res.status === 403 && body.code === 'ROLE_REQUIRED', `got ${res.status}/${body.code}`);
+    await upsertUser({ email: 'tester@example.com', role: 'manager', authorized: false, fname: 'Test', lname: 'Caller' });
+    res = await fetch(`${BASE}/patients/${id}`, { method: 'DELETE' });
+    check('DELETE as manager is 204', res.status === 204, `got ${res.status}`);
+    await upsertUser({ email: 'tester@example.com', role: 'clinician', authorized: true, fname: 'Test', lname: 'Caller' });
     res = await fetch(`${BASE}/patients/${id}/restore`, { method: 'POST' });
-    check('restore without PIN is 403', res.status === 403, `got ${res.status}`);
-    res = await fetch(`${BASE}/patients/${id}/restore`, { method: 'POST', headers: { 'X-Manager-Pin': ADMIN_PIN } });
-    check('restore with admin PIN is 200', res.status === 200, `got ${res.status}`);
+    body = await res.json();
+    check('restore as clinician is 403 ROLE_REQUIRED', res.status === 403 && body.code === 'ROLE_REQUIRED', `got ${res.status}/${body.code}`);
+    await upsertUser({ email: 'tester@example.com', role: 'admin', authorized: true, fname: 'Test', lname: 'Caller' });
+    res = await fetch(`${BASE}/patients/${id}/restore`, { method: 'POST' });
+    check('restore as admin is 200', res.status === 200, `got ${res.status}`);
   } finally {
     server.close();
     await pool.end();

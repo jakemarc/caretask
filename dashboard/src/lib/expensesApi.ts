@@ -135,10 +135,6 @@ const json = (body: unknown): RequestInit => ({
   body: JSON.stringify(body),
 });
 
-function pinHeaders(pin: string): RequestInit {
-  return { method: "POST", headers: { "X-Manager-Pin": pin } };
-}
-
 // The label a report shows: its friendly title when set, else
 // one generated from the period ("October 2026 Expense
 // Report").
@@ -184,12 +180,14 @@ export async function submitExpenseReport(
   return out.report;
 }
 
+// Lifecycle actions (approve / reject / pay) are ROLE-GATED on
+// the API (manager/admin), and a manager cannot process their
+// own report (403 SELF_APPROVAL).
 export async function approveExpenseReport(
   user: User,
   id: number,
-  pin: string,
 ): Promise<ExpenseReport> {
-  const out = (await apiFetch(user, `/expense-reports/${id}/approve`, pinHeaders(pin))) as {
+  const out = (await apiFetch(user, `/expense-reports/${id}/approve`, { method: "POST" })) as {
     report: ExpenseReport;
   };
   return out.report;
@@ -198,9 +196,8 @@ export async function approveExpenseReport(
 export async function rejectExpenseReport(
   user: User,
   id: number,
-  pin: string,
 ): Promise<ExpenseReport> {
-  const out = (await apiFetch(user, `/expense-reports/${id}/reject`, pinHeaders(pin))) as {
+  const out = (await apiFetch(user, `/expense-reports/${id}/reject`, { method: "POST" })) as {
     report: ExpenseReport;
   };
   return out.report;
@@ -209,12 +206,10 @@ export async function rejectExpenseReport(
 export async function payExpenseReport(
   user: User,
   id: number,
-  pin: string,
   paymentRef: string,
 ): Promise<ExpenseReport> {
   const out = (await apiFetch(user, `/expense-reports/${id}/pay`, {
     method: "POST",
-    headers: { "X-Manager-Pin": pin },
     body: JSON.stringify({ payment_ref: paymentRef || undefined }),
   })) as { report: ExpenseReport };
   return out.report;

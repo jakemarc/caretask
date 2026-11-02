@@ -34,7 +34,8 @@
 const express = require('express');
 const pool = require('../db');
 const { insertEvent } = require('../lib/eventLog');
-const requireManagerPin = require('../lib/requireManagerPin');
+const { requireRole, attachManager } = require('../lib/requireRole');
+const requireManagerRole = requireRole('manager', 'admin');
 
 const router = express.Router();
 
@@ -205,7 +206,7 @@ router.get('/categories', async (req, res, next) => {
   }
 });
 
-// --- Category management (Settings screen). PIN-gated like staff
+// --- Category management (Settings screen). Role-gated like staff
 // writes: categories are practice configuration. Deactivate is a
 // soft state (active=false), never a delete — appointments keep
 // pointing at the category, and it leaves the booking pickers.
@@ -280,7 +281,7 @@ async function logCategoryAction(client, req, action, row) {
   });
 }
 
-router.post('/categories', requireManagerPin, async (req, res, next) => {
+router.post('/categories', requireManagerRole, async (req, res, next) => {
   try {
     const values = validateCategory(req.body ?? {});
     const created = await withTx(async (client) => {
@@ -308,7 +309,7 @@ router.post('/categories', requireManagerPin, async (req, res, next) => {
   }
 });
 
-router.put('/categories/:id', requireManagerPin, async (req, res, next) => {
+router.put('/categories/:id', requireManagerRole, async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id)) return res.status(400).json({ error: 'id must be an integer' });
@@ -339,7 +340,7 @@ router.put('/categories/:id', requireManagerPin, async (req, res, next) => {
   }
 });
 
-router.delete('/categories/:id', requireManagerPin, async (req, res, next) => {
+router.delete('/categories/:id', requireManagerRole, async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id)) return res.status(400).json({ error: 'id must be an integer' });
@@ -360,7 +361,7 @@ router.delete('/categories/:id', requireManagerPin, async (req, res, next) => {
   }
 });
 
-router.post('/categories/:id/restore', requireManagerPin, async (req, res, next) => {
+router.post('/categories/:id/restore', requireManagerRole, async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id)) return res.status(400).json({ error: 'id must be an integer' });
@@ -494,7 +495,7 @@ router.post('/', async (req, res, next) => {
   }
 });
 
-router.put('/:id', requireManagerPin, async (req, res, next) => {
+router.put('/:id', attachManager, async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id)) return res.status(400).json({ error: 'id must be an integer' });
@@ -584,7 +585,7 @@ router.post('/:id/status', async (req, res, next) => {
   }
 });
 
-router.delete('/:id', requireManagerPin, async (req, res, next) => {
+router.delete('/:id', requireManagerRole, async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id)) return res.status(400).json({ error: 'id must be an integer' });
@@ -614,7 +615,7 @@ router.delete('/:id', requireManagerPin, async (req, res, next) => {
   }
 });
 
-router.post('/:id/restore', requireManagerPin, async (req, res, next) => {
+router.post('/:id/restore', requireManagerRole, async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id)) return res.status(400).json({ error: 'id must be an integer' });

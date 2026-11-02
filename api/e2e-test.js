@@ -49,9 +49,10 @@ function stubAuth(req, res, next) {
   next();
 }
 
-// Patient update / soft-delete / restore are manager-PIN gated
-// (lib/requireManagerPin.js). The harness upserts a test manager with
-// this PIN and sends it on the gated calls.
+// Patient soft-delete / restore are ROLE-gated (manager/admin;
+// lib/requireRole.js) since the PIN was retired on 2026-11-02.
+// The harness upserts the stub actor itself as a manager; update
+// is ungated. PIN_HEADERS below are legacy and ignored.
 const TEST_PIN = '1357';
 const PIN_HEADERS = { 'X-Manager-Pin': TEST_PIN };
 
@@ -86,7 +87,7 @@ async function main() {
     const testPinHash = await hashPin(TEST_PIN);
     await pool.query(
       `INSERT INTO users (email, role, authorized, fname, lname, pin_hash)
-       VALUES ('manager@example.com', 'manager', false, 'Test', 'Manager', $1)
+       VALUES ('tester@example.com', 'manager', false, 'Test', 'Manager', $1)
        ON CONFLICT (email) DO UPDATE
          SET pin_hash = EXCLUDED.pin_hash, role = 'manager', active = true`,
       [testPinHash],

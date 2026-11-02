@@ -6,9 +6,10 @@
 // home↔home-office commute is added as commute legs and
 // deducted per day by the API (reimbursable = driven −
 // commute, floored at zero). Drafts stay editable; the owner
-// submits for payment; a manager approves / sends back /
-// marks paid with the manager PIN. Previous reports stay
-// listed for viewing and printing.
+// submits for payment; a manager (never the report's owner)
+// approves / sends back / marks paid — role-gated on the API
+// since the manager PIN was retired on 2026-11-02. Previous
+// reports stay listed for viewing and printing.
 //
 // Mileage entry (Jake's form spec): each address is typed
 // with autocomplete OR filled from the phone's GPS with the
@@ -54,6 +55,7 @@ import {
   type ExpenseReport,
   type ReportDetail,
 } from "../lib/expensesApi";
+import { isManagerRole, useMyStaff } from "../lib/useMyRole";
 import type { ApiRequestError } from "../lib/expensesApi";
 
 const CATEGORIES: { value: string; label: string }[] = [
@@ -104,8 +106,11 @@ function prettyDate(iso: string): string {
 
 function errText(err: unknown, fallback: string): string {
   const e = err as ApiRequestError | null;
-  if (e?.code === "PIN_REQUIRED" || e?.code === "PIN_INVALID") {
-    return "That PIN doesn't match an active manager.";
+  if (e?.code === "ROLE_REQUIRED" || e?.code === "NO_STAFF_RECORD") {
+    return "That action needs a manager or admin role.";
+  }
+  if (e?.code === "SELF_APPROVAL") {
+    return "You can't process your own report — another manager needs to do this one.";
   }
   if (e?.code === "REPORT_LOCKED") {
     return "This report is no longer a draft, so it can't be changed.";
@@ -153,6 +158,8 @@ export default function ExpensesView({
   // straight into the report covering the current month.
   autoOpenCurrent?: boolean;
 }) {
+  const me = useMyStaff(user);
+  const isManager = isManagerRole(me);
   const [reports, setReports] = useState<ExpenseReport[] | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [detail, setDetail] = useState<ReportDetail | null>(null);
@@ -185,7 +192,6 @@ export default function ExpensesView({
 
   // Lifecycle.
   const [confirmSubmit, setConfirmSubmit] = useState(false);
-  const [pin, setPin] = useState("");
   const [paymentRef, setPaymentRef] = useState("");
 
   const loadReports = useCallback(async () => {
@@ -441,11 +447,10 @@ export default function ExpensesView({
     setError("");
     try {
       if (action === "submit") await submitExpenseReport(user, report.id);
-      if (action === "approve") await approveExpenseReport(user, report.id, pin);
-      if (action === "reject") await rejectExpenseReport(user, report.id, pin);
-      if (action === "pay") await payExpenseReport(user, report.id, pin, paymentRef);
+      if (action === "approve") await approveExpenseReport(user, report.id);
+      if (action === "reject") await rejectExpenseReport(user, report.id);
+      if (action === "pay") await payExpenseReport(user, report.id, paymentRef);
       setConfirmSubmit(false);
-      setPin("");
       setPaymentRef("");
       await Promise.all([loadReports(), loadDetail(report.id)]);
     } catch (err) {
@@ -940,63 +945,67 @@ export default function ExpensesView({
             )}
           </div>
 
-          {(report.status === "submitted" || report.status === "approved") && (
-            <div className="exp-manager">
-              <h3>Manager review</h3>
-              <div className="exp-form-grid">
-                <label>
-                  Manager PIN
-                  <input
-                    type="password"
-                    inputMode="numeric"
-                    value={pin}
-                    onChange={(e) => setPin(e.target.value)}
-                    placeholder="PIN"
-                  />
-                </label>
+          {(report.status === "submitted" || report.status === "approved") &&
+            (isManager && me && Number(me.id) !== report.user_id ? (
+              <div className="exp-manager">
+                <h3>Manager review</h3>
                 {report.status === "approved" && (
-                  <label className="exp-grow">
-                    Payment reference (optional)
-                    <input
-                      type="text"
-                      value={paymentRef}
-                      onChange={(e) => setPaymentRef(e.target.value)}
-                      placeholder="ACH-1001"
-                    />
-                  </label>
+                  <div className="exp-form-grid">
+                    <label className="exp-grow">
+                      Payment reference (optional)
+                      <input
+                        type="text"
+                        value={paymentRef}
+                        onChange={(e) => setPaymentRef(e.target.value)}
+                        placeholder="ACH-1001"
+                      />
+                    </label>
+                  </div>
                 )}
-              </div>
-              {report.status === "submitted" ? (
-                <div className="exp-actions">
+                {report.status === "submitted" ? (
+                  <div className="exp-actions">
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      disabled={busy}
+                      onClick={() => lifecycle("approve")}
+                    >
+                      <Check size={16} /> Approve
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      disabled={busy}
+                      onClick={() => lifecycle("reject")}
+                    >
+                      <Undo2 size={16} /> Send back to draft
+                    </button>
+                  </div>
+                ) : (
                   <button
                     type="button"
                     className="btn btn-primary"
-                    disabled={busy || !pin}
-                    onClick={() => lifecycle("approve")}
+                    disabled={busy}
+                    onClick={() => lifecycle("pay")}
                   >
-                    <Check size={16} /> Approve
+                    <Check size={16} /> Mark paid
                   </button>
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    disabled={busy || !pin}
-                    onClick={() => lifecycle("reject")}
-                  >
-                    <Undo2 size={16} /> Send back to draft
-                  </button>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  disabled={busy || !pin}
-                  onClick={() => lifecycle("pay")}
-                >
-                  <Check size={16} /> Mark paid
-                </button>
-              )}
-            </div>
-          )}
+                )}
+              </div>
+            ) : (
+              <div className="exp-manager">
+                <h3>Manager review</h3>
+                <p className="card-meta">
+                  {me && Number(me.id) === report.user_id
+                    ? report.status === "submitted"
+                      ? "Your report is with a manager for review. A manager other than you approves it."
+                      : "Approved — a manager other than you marks it paid."
+                    : report.status === "submitted"
+                      ? "This report is with a manager for review."
+                      : "Approved — waiting for a manager to mark it paid."}
+                </p>
+              </div>
+            ))}
         </>
       )}
     </section>
