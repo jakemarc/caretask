@@ -4,6 +4,44 @@ All notable shipped changes to the CareTask platform. Newest first.
 "Live" means deployed and verified at the listed URL; "Local" means
 built and verified but not deployed.
 
+## 2026-11-02
+
+- **Mobile floating view — Live 2026-11-02 (deploy-19:
+  dashboard bundle `index-CQDxFnPf.js`, deployment
+  https://06bae334.marcinnotech-app.pages.dev, verified —
+  main URL serves the new bundle, asset 200, live bundle
+  carries the mobile-view markers, API health green).** The
+  pre-deploy source sits on GitHub branch
+  `mobile-floating-view` (commit `caafd2e`); main fast-forwards
+  to the same files with this deploy. Revert path: redeploy
+  the deploy-18 build (main's prior state). Jake's mobile-first redesign, mocked up and
+  approved piece by piece the same morning. At phone widths
+  (≤720px) the header and the bottom-bar sidebar are replaced
+  by floating glass chrome: a **menu circle** (top-left) that
+  opens the full sidebar as a slide-in drawer (theme toggle +
+  sign out move to the drawer's foot), a **desktop-view toggle
+  circle** (top-right, same force-desktop switch as the header
+  button), and a **floating pill footer** — Dashboard /
+  Patients / Mileage / Calendar with the active destination
+  filled teal; **Mileage** opens Expenses flagged to auto-open
+  the report covering the current month (the sidebar Expenses
+  entry still opens the plain list). **Patients page:** title
+  rides at the floating buttons' level; the search becomes a
+  **floating translucent bar** with a **funnel button** — the
+  only filter is Status, **defaulting to Active** (On hold /
+  Discharged / All statuses in the popover; a teal dot badges
+  the funnel whenever the filter differs from Active); typing
+  in search **searches all patients** (every status) and
+  overrides the filter, and the count line says so. The mobile
+  list is **cards**: zone dot + name (+ status word when not
+  active) + directions/call buttons — **no address on the
+  card**; tap opens the profile. **Patient Profile:** a
+  **floating vertical pill** on the right edge, icons only —
+  Call (teal), Directions, Edit (same PIN-gate flow). Desktop
+  and forced-desktop views are unchanged (the desktop table,
+  its search row, and the header/sidebar all restore under
+  `.force-desktop`).
+
 ## 2026-11-01
 
 - **Expense reports + mileage — Live 2026-11-01

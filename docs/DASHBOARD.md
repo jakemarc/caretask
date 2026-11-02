@@ -107,7 +107,23 @@ Add Patient moved onto the Patients page as a right-justified
 **Add Patient** button in the page head (a **+ icon only** on
 mobile, ≤720px), and Patients Map left the menu (the map
 view code stays in place, currently unreachable from the
-nav). Displayed patient names carry **no
+nav).
+
+**Mobile floating view (2026-11-02, Jake; LIVE as deploy-19,
+bundle `index-CQDxFnPf.js`):** at ≤720px the header and bottom-bar sidebar are
+replaced by floating glass chrome — menu circle top-left
+(sidebar becomes a slide-in drawer; theme + sign out at its
+foot), desktop-view toggle circle top-right, and a floating
+pill footer (Dashboard / Patients / Mileage / Calendar;
+Mileage auto-opens the current month's expense report).
+Patients on mobile: floating translucent search whose funnel
+holds the only filter — Status, default Active — while search
+itself searches all patients and overrides the filter; the
+list renders as address-free cards (zone dot, name, status
+word when not active, directions/call buttons). The Patient
+Profile carries a floating vertical pill on the right edge
+with Call / Directions / Edit icons only. Forced-desktop view
+restores the desktop arrangement wholesale. Displayed patient names carry **no
 honorific title** (`fullName()` composes first/middle/last/
 suffix only; the stored `title` field is unchanged). The Patient Profile is deliberately slim: the
 header line shows a compact "74/F" (exact age from DOB + sex

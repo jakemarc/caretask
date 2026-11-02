@@ -19,7 +19,7 @@
 // the toll route's miles the leg's miles even when longer;
 // miles stay hand-correctable. Saving a leg chains the next
 // leg's start to this leg's end.
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { User } from "firebase/auth";
 import {
   ArrowLeft,
@@ -144,10 +144,14 @@ export default function ExpensesView({
   user,
   people,
   apiConnected,
+  autoOpenCurrent = false,
 }: {
   user: User;
   people: PersonUnderCare[];
   apiConnected: boolean;
+  // Opened from the mobile Mileage pill (Jake, 2026-11-02): jump
+  // straight into the report covering the current month.
+  autoOpenCurrent?: boolean;
 }) {
   const [reports, setReports] = useState<ExpenseReport[] | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -207,6 +211,20 @@ export default function ExpensesView({
   useEffect(() => {
     if (apiConnected) void loadReports();
   }, [apiConnected, loadReports]);
+
+  // Mileage-pill entry: once the list loads, open the report whose
+  // period covers today (else the newest listed). Once per mount.
+  const autoOpenedRef = useRef(false);
+  useEffect(() => {
+    if (!autoOpenCurrent || autoOpenedRef.current) return;
+    if (!reports || reports.length === 0 || selectedId !== null) return;
+    autoOpenedRef.current = true;
+    const today = todayStr();
+    const covering = reports.find(
+      (r) => r.period_start <= today && today <= r.period_end,
+    );
+    setSelectedId((covering ?? reports[0]).id);
+  }, [autoOpenCurrent, reports, selectedId]);
 
   useEffect(() => {
     if (selectedId !== null && apiConnected) void loadDetail(selectedId);

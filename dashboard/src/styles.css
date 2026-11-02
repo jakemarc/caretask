@@ -3044,3 +3044,396 @@ label.contact-picker-row {
 .exp-back {
   margin-bottom: 10px;
 }
+
+/* ---------- Mobile floating view (Jake, 2026-11-02) ----------
+   Phone widths only. The desktop header + sidebar arrangement is
+   replaced by floating glass chrome: a menu circle (top-left,
+   opens the sidebar as a drawer), a desktop-view toggle circle
+   (top-right), and a pill footer (Dashboard / Patients / Mileage /
+   Calendar). Patients gets a floating translucent search with a
+   funnel status filter and address-free cards; the Patient
+   Profile gets a vertical action pill (Call / Directions / Edit).
+   .force-desktop turns all of it back off. */
+
+.mobile-fab,
+.mobile-pill,
+.mobile-scrim,
+.patients-floating-search,
+.patients-filter-popover,
+.patient-cards,
+.profile-vpill,
+.mobile-count-note,
+.drawer-actions {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .app-header {
+    display: none;
+  }
+
+  .app-main {
+    padding: 20px 16px 118px;
+  }
+
+  /* Sidebar: hidden until the menu button opens it as a drawer. */
+  .sidebar {
+    display: none;
+  }
+
+  .sidebar.mobile-open {
+    display: flex;
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 266px;
+    max-width: 84vw;
+    z-index: 80;
+    flex-direction: column;
+    align-items: stretch;
+    overflow-y: auto;
+    background: var(--panel);
+    border-right: 1px solid var(--border);
+    border-top: none;
+    box-shadow: 16px 0 40px rgba(10, 25, 22, 0.25);
+    padding: 16px 12px;
+  }
+
+  .sidebar.mobile-open .sidebar-nav {
+    flex: none;
+    flex-wrap: wrap;
+  }
+
+  .sidebar.mobile-open .nav-btn {
+    flex: none;
+    width: 100%;
+    justify-content: flex-start;
+    padding: 10px 12px;
+  }
+
+  .sidebar.mobile-open .nav-label {
+    display: inline;
+  }
+
+  .sidebar.mobile-open .sidebar-toggle {
+    display: none;
+  }
+
+  .sidebar.mobile-open .drawer-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: auto;
+    border-top: 1px solid var(--border);
+    padding-top: 10px;
+  }
+
+  .mobile-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 70;
+    background: rgba(8, 20, 17, 0.42);
+  }
+
+  .mobile-fab {
+    display: flex;
+    position: fixed;
+    top: 14px;
+    z-index: 60;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    align-items: center;
+    justify-content: center;
+    color: var(--text);
+    background: color-mix(in srgb, var(--panel) 62%, transparent);
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--border);
+    box-shadow: 0 4px 14px rgba(10, 25, 22, 0.16);
+    cursor: pointer;
+  }
+
+  .mobile-menu-btn {
+    left: 14px;
+  }
+
+  .mobile-view-btn {
+    right: 14px;
+  }
+
+  .mobile-pill {
+    display: flex;
+    position: fixed;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: 16px;
+    z-index: 60;
+    gap: 2px;
+    padding: 7px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--panel) 74%, transparent);
+    -webkit-backdrop-filter: blur(14px);
+    backdrop-filter: blur(14px);
+    border: 1px solid var(--border);
+    box-shadow: 0 10px 28px rgba(10, 25, 22, 0.22);
+  }
+
+  .mobile-pill .mp-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    min-width: 64px;
+    padding: 7px 10px;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--muted);
+    font-size: 10.5px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .mobile-pill .mp-item.active {
+    background: var(--teal);
+    color: #fff;
+    box-shadow: 0 4px 12px rgba(13, 148, 136, 0.4);
+  }
+
+  /* Patients: floating search + funnel filter + cards. */
+  .patient-list-panel .agency-search-row {
+    display: none;
+  }
+
+  .patient-list-panel .patients-table {
+    display: none;
+  }
+
+  .patients-floating-search {
+    display: flex;
+    position: fixed;
+    top: 74px;
+    left: 14px;
+    right: 14px;
+    z-index: 55;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 8px 8px 14px;
+    border-radius: 999px;
+    color: var(--muted);
+    background: color-mix(in srgb, var(--panel) 66%, transparent);
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--border);
+    box-shadow: 0 8px 22px rgba(10, 25, 22, 0.16);
+  }
+
+  .patients-floating-search input {
+    flex: 1;
+    min-width: 0;
+    border: 0;
+    background: transparent;
+    color: var(--text);
+    font-size: 14px;
+    outline: none;
+  }
+
+  .patients-floating-search .pfs-clear {
+    display: flex;
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    padding: 4px;
+  }
+
+  .patients-floating-search .pfs-funnel {
+    position: relative;
+    flex: none;
+    width: 36px;
+    height: 36px;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--teal-deep);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+  }
+
+  .patients-floating-search .pfs-badge {
+    position: absolute;
+    top: 1px;
+    right: 1px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--teal);
+    border: 2px solid var(--panel);
+  }
+
+  .patients-filter-popover {
+    display: block;
+    position: fixed;
+    top: 130px;
+    left: 14px;
+    right: 14px;
+    z-index: 55;
+    padding: 12px 14px;
+    border-radius: 18px;
+    background: color-mix(in srgb, var(--panel) 82%, transparent);
+    -webkit-backdrop-filter: blur(14px);
+    backdrop-filter: blur(14px);
+    border: 1px solid var(--border);
+    box-shadow: 0 12px 28px rgba(10, 25, 22, 0.2);
+  }
+
+  .patients-filter-popover .pfp-label {
+    margin: 0 0 9px;
+    font-size: 11.5px;
+    font-weight: 700;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  .patients-filter-popover .pfp-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+  }
+
+  .patients-filter-popover .pfp-chip {
+    padding: 6px 13px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--text);
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .patients-filter-popover .pfp-chip.on {
+    background: var(--text);
+    border-color: var(--text);
+    color: var(--panel);
+  }
+
+  .mobile-count-note {
+    display: block;
+    margin: 64px 0 10px;
+  }
+
+  .patient-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .patient-card {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 13px 15px;
+    cursor: pointer;
+  }
+
+  .patient-card .pc-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .patient-card .pc-status {
+    color: var(--muted);
+    font-size: 12.5px;
+  }
+
+  .patient-card .pc-icon-btn {
+    flex: none;
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--teal-deep);
+    background: color-mix(in srgb, var(--teal) 10%, transparent);
+  }
+
+  /* Patient Profile: vertical action pill. */
+  .profile-vpill {
+    display: flex;
+    position: fixed;
+    right: 12px;
+    top: 212px;
+    z-index: 55;
+    flex-direction: column;
+    gap: 2px;
+    padding: 7px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--panel) 74%, transparent);
+    -webkit-backdrop-filter: blur(14px);
+    backdrop-filter: blur(14px);
+    border: 1px solid var(--border);
+    box-shadow: 0 10px 26px rgba(10, 25, 22, 0.22);
+  }
+
+  .profile-vpill .vpill-btn {
+    width: 42px;
+    height: 42px;
+    border: 0;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--teal-deep);
+    background: transparent;
+    cursor: pointer;
+  }
+
+  .profile-vpill .vpill-btn.primary {
+    background: var(--teal);
+    color: #fff;
+    box-shadow: 0 4px 12px rgba(13, 148, 136, 0.4);
+  }
+}
+
+/* Forced desktop view: the floating mobile chrome stays off and the
+   desktop Patients arrangement (search row + table) is restored. */
+.force-desktop .mobile-fab,
+.force-desktop .mobile-pill,
+.force-desktop .mobile-scrim,
+.force-desktop .patients-floating-search,
+.force-desktop .patients-filter-popover,
+.force-desktop .patient-cards,
+.force-desktop .profile-vpill,
+.force-desktop .mobile-count-note,
+.force-desktop .drawer-actions {
+  display: none !important;
+}
+
+.force-desktop .sidebar {
+  display: flex;
+}
+
+.force-desktop .app-header {
+  display: flex;
+}
+
+.force-desktop .patient-list-panel .patients-table {
+  display: table;
+}
+
+.force-desktop .patient-list-panel .agency-search-row {
+  display: block;
+}
