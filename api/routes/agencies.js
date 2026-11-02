@@ -39,7 +39,8 @@
 const express = require('express');
 const pool = require('../db');
 const { insertEvent } = require('../lib/eventLog');
-const requireManagerPin = require('../lib/requireManagerPin');
+const { requireRole, attachManager } = require('../lib/requireRole');
+const requireManagerRole = requireRole('manager', 'admin');
 const { syncAgencies, parseDba } = require('../lib/agencySync');
 
 const router = express.Router();
@@ -189,7 +190,7 @@ router.get('/:id', async (req, res, next) => {
 });
 
 // --- POST /agencies/sync (manager PIN)
-router.post('/sync', requireManagerPin, async (req, res, next) => {
+router.post('/sync', requireManagerRole, async (req, res, next) => {
   try {
     const summary = await syncAgencies(pool, {
       actor: req.user,
@@ -204,7 +205,7 @@ router.post('/sync', requireManagerPin, async (req, res, next) => {
 });
 
 // --- PUT /agencies/:id (manager PIN, local fields only)
-router.put('/:id', requireManagerPin, async (req, res, next) => {
+router.put('/:id', requireManagerRole, async (req, res, next) => {
   const id = parseId(req.params.id);
   if (id === null) return res.status(404).json({ error: 'agency not found' });
   const body = req.body || {};

@@ -73,6 +73,11 @@ async function setup() {
      ON CONFLICT (email) DO UPDATE SET pin_hash = EXCLUDED.pin_hash, active = true`,
     [await hashPin(MANAGER_PIN)],
   );
+  await pool.query(
+    `INSERT INTO users (email, role, authorized, active, fname, lname)
+     VALUES ('tester@example.com', 'clinician', false, true, 'Test', 'Caller')
+     ON CONFLICT (email) DO UPDATE SET role = 'clinician', active = true`,
+  );
   const prov = await pool.query(
     `INSERT INTO users (email, role, authorized, active, fname, lname)
      VALUES ('appt-prov@example.com', 'clinician', true, true, 'Pat', 'Provider')
@@ -223,18 +228,13 @@ async function main() {
     check('status change without PIN → 200 arrived',
       r.status === 200 && (await r.json()).appointment?.status === 'arrived', `got ${r.status}`);
 
-    // --- update gate + behavior
-    r = await call('PUT', `/appointments/${apptId}`, { title: 'Changed' });
-    check('update no PIN → 403 PIN_REQUIRED',
-      r.status === 403 && (await r.json()).code === 'PIN_REQUIRED', `got ${r.status}`);
-    r = await call('PUT', `/appointments/${apptId}`, { title: 'Changed' }, '9999');
-    check('update wrong PIN → 403 PIN_INVALID',
-      r.status === 403 && (await r.json()).code === 'PIN_INVALID', `got ${r.status}`);
+    // --- update behavior (NOT gated since the PIN retired on
+    // 2026-11-02; role gates live on delete/restore + categories)
     r = await call('PUT', `/appointments/${apptId}`,
-      { starts_at: iso(day(1, 12)), ends_at: iso(day(1, 11)) }, MANAGER_PIN);
+      { starts_at: iso(day(1, 12)), ends_at: iso(day(1, 11)) });
     check('update merged range invalid → 400', r.status === 400, `got ${r.status}`);
-    r = await call('PUT', `/appointments/${apptId}`, { title: 'Changed' }, MANAGER_PIN);
-    check('update with PIN → 200 + applied',
+    r = await call('PUT', `/appointments/${apptId}`, { title: 'Changed' });
+    check('update without PIN → 200 + applied',
       r.status === 200 && (await r.json()).appointment?.title === 'Changed', `got ${r.status}`);
 
     // --- events
@@ -245,21 +245,17 @@ async function main() {
     check('status event carries from/to',
       mine.some((e) => e.details?.action === 'appointment_status'
         && e.details?.from_status === 'booked' && e.details?.to_status === 'arrived'));
-    check('update event names the manager',
+    check('update event names the actor',
       mine.some((e) => e.details?.action === 'appointment_update'
-        && e.details?.manager_email === 'appt-mgr@example.com'));
+        && e.details?.manager_email === 'tester@example.com'));
 
     // --- category management (Settings)
     r = await call('POST', '/appointments/categories', {
       name: 'Test Category X', default_duration_min: 25,
     });
-    check('category create no PIN → 403 PIN_REQUIRED',
-      r.status === 403 && (await r.json()).code === 'PIN_REQUIRED', `got ${r.status}`);
-    r = await call('POST', '/appointments/categories', {
-      name: 'Test Category X', default_duration_min: 25,
-    }, '9999');
-    check('category create wrong PIN → 403 PIN_INVALID',
-      r.status === 403 && (await r.json()).code === 'PIN_INVALID', `got ${r.status}`);
+    check('category create as clinician → 403 ROLE_REQUIRED',
+      r.status === 403 && (await r.json()).code === 'ROLE_REQUIRED', `got ${r.status}`);
+    await pool.query("UPDATE users SET role = 'manager' WHERE email = 'tester@example.com'");
     r = await call('POST', '/appointments/categories', {
       name: 'Test Category X', default_duration_min: 0,
     }, MANAGER_PIN);
@@ -276,7 +272,7 @@ async function main() {
       name: 'Test Category X', color: '#123456', default_duration_min: 25,
     }, MANAGER_PIN);
     const newCat = (await r.json()).category;
-    check('category create with PIN → 201', r.status === 201 && newCat?.name === 'Test Category X',
+    check('category create as manager → 201', r.status === 201 && newCat?.name === 'Test Category X',
       `got ${r.status}`);
     r = await call('POST', '/appointments/categories', {
       name: 'test category x',
@@ -310,18 +306,21 @@ async function main() {
     check('category writes logged as admin_action naming the manager',
       adminEvents.some((e) => e.details?.action === 'category_create'
         && e.details?.category_name === 'Test Category X'
-        && e.details?.manager_email === 'appt-mgr@example.com'));
+        && e.details?.manager_email === 'tester@example.com'));
     await pool.query("DELETE FROM appointment_categories WHERE name = 'Test Category X'");
 
-    // --- delete + restore
+    // --- delete + restore (role-gated)
+    await pool.query("UPDATE users SET role = 'clinician' WHERE email = 'tester@example.com'");
     r = await call('DELETE', `/appointments/${apptId}`);
-    check('delete no PIN → 403', r.status === 403, `got ${r.status}`);
+    check('delete as clinician → 403 ROLE_REQUIRED',
+      r.status === 403 && (await r.json()).code === 'ROLE_REQUIRED', `got ${r.status}`);
+    await pool.query("UPDATE users SET role = 'manager' WHERE email = 'tester@example.com'");
     r = await call('DELETE', `/appointments/${apptId}`, undefined, MANAGER_PIN);
-    check('delete with PIN → 200', r.status === 200, `got ${r.status}`);
+    check('delete as manager → 200', r.status === 200, `got ${r.status}`);
     r = await call('GET', `/appointments/${apptId}`);
     check('deleted appointment GET → 404', r.status === 404, `got ${r.status}`);
     r = await call('POST', `/appointments/${apptId}/restore`, undefined, MANAGER_PIN);
-    check('restore with PIN → 200', r.status === 200, `got ${r.status}`);
+    check('restore as manager → 200', r.status === 200, `got ${r.status}`);
     r = await call('POST', `/appointments/${apptId}/restore`, undefined, MANAGER_PIN);
     check('second restore → 409', r.status === 409, `got ${r.status}`);
   } finally {

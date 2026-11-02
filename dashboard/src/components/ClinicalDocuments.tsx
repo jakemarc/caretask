@@ -4,13 +4,13 @@ import {
   createDocument,
   deleteDocument,
   finalizeDocument,
-  isPinRejection,
+  isRoleRejection,
   listDocuments,
   updateDocument,
-  verifyManagerPin,
   type ApiDocument,
   type ApiRequestError,
 } from "../lib/patientApi";
+import { isManagerRole, useMyStaff } from "../lib/useMyRole";
 import {
   DOC_TEMPLATES,
   emptySections,
@@ -21,9 +21,9 @@ import {
 // Patient Profile → Clinical Documents panel: Evaluation,
 // Reassessment, and Discharge documents on the OpenEMR
 // encounter-forms pattern. Drafts are editable; finalized documents
-// are locked. Delete is manager-PIN gated exactly like patient
-// delete (PIN verified server-side, then it rides along on the
-// DELETE itself). Deleted documents leave the chart list (the API
+// are locked. Delete is role-gated (manager/admin) exactly like
+// patient delete, so only managers see the Delete button.
+// Deleted documents leave the chart list (the API
 // excludes them, and there is no deleted-documents view), so no
 // restore UI lives here — restoreDocument exists in the API client
 // for completeness only.
@@ -34,6 +34,8 @@ interface Props {
 }
 
 export default function ClinicalDocuments({ user, patientApiId }: Props) {
+  const me = useMyStaff(user);
+  const isManager = isManagerRole(me);
   const [docs, setDocs] = useState<ApiDocument[] | null>(null);
   const [error, setError] = useState("");
 
@@ -56,14 +58,8 @@ export default function ClinicalDocuments({ user, patientApiId }: Props) {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState("");
 
-  // Delete gate: manager PIN panel, then a confirm step. The
-  // verified PIN is held in component memory only.
-  const [showPinPanel, setShowPinPanel] = useState(false);
-  const [pinEntry, setPinEntry] = useState("");
-  const [pinError, setPinError] = useState("");
-  const [pinChecking, setPinChecking] = useState(false);
-  const [managerPin, setManagerPin] = useState("");
-  const [authorizingManager, setAuthorizingManager] = useState("");
+  // Delete flow: a confirm step (managers/admins only — the API
+  // role-gates the DELETE itself).
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleteError, setDeleteError] = useState("");
   const [deleting, setDeleting] = useState(false);
@@ -81,17 +77,12 @@ export default function ClinicalDocuments({ user, patientApiId }: Props) {
   }, [load]);
 
   // Switching patients closes any open editor, new-document form,
-  // or delete gate, and forgets the verified manager PIN.
+  // or delete confirm.
   useEffect(() => {
     setSelected(null);
     setEditorError("");
     setShowNew(false);
     setCreateError("");
-    setShowPinPanel(false);
-    setPinEntry("");
-    setPinError("");
-    setManagerPin("");
-    setAuthorizingManager("");
     setConfirmingDelete(false);
     setDeleteError("");
     setError("");
@@ -103,9 +94,6 @@ export default function ClinicalDocuments({ user, patientApiId }: Props) {
     setEditTitle(doc.title ?? "");
     setEditSections({ ...emptySections(template), ...doc.sections });
     setEditorError("");
-    setShowPinPanel(false);
-    setPinEntry("");
-    setPinError("");
     setConfirmingDelete(false);
     setDeleteError("");
   }
@@ -113,9 +101,6 @@ export default function ClinicalDocuments({ user, patientApiId }: Props) {
   function closeEditor() {
     setSelected(null);
     setEditorError("");
-    setShowPinPanel(false);
-    setPinEntry("");
-    setPinError("");
     setConfirmingDelete(false);
     setDeleteError("");
   }
@@ -206,40 +191,7 @@ export default function ClinicalDocuments({ user, patientApiId }: Props) {
 
   function startDelete() {
     setDeleteError("");
-    if (managerPin) {
-      setConfirmingDelete(true);
-    } else {
-      setPinEntry("");
-      setPinError("");
-      setShowPinPanel(true);
-    }
-  }
-
-  async function submitPin(e: React.FormEvent) {
-    e.preventDefault();
-    const pin = pinEntry.trim();
-    if (!/^\d{4,8}$/.test(pin)) {
-      setPinError("Incorrect PIN");
-      return;
-    }
-    setPinChecking(true);
-    setPinError("");
-    try {
-      const manager = await verifyManagerPin(user, pin);
-      setManagerPin(pin);
-      setAuthorizingManager(manager.name);
-      setShowPinPanel(false);
-      setPinEntry("");
-      setConfirmingDelete(true);
-    } catch (err) {
-      setPinError(
-        isPinRejection(err)
-          ? "Incorrect PIN"
-          : "Couldn't verify the PIN — check the connection and try again.",
-      );
-    } finally {
-      setPinChecking(false);
-    }
+    setConfirmingDelete(true);
   }
 
   async function confirmDelete() {
@@ -247,20 +199,16 @@ export default function ClinicalDocuments({ user, patientApiId }: Props) {
     setDeleting(true);
     setDeleteError("");
     try {
-      await deleteDocument(user, selected.id, managerPin);
+      await deleteDocument(user, selected.id);
       setConfirmingDelete(false);
       closeEditor();
       await load();
     } catch (err) {
-      if (isPinRejection(err)) {
-        setDeleteError("Incorrect PIN");
-        setManagerPin("");
-        setAuthorizingManager("");
-        setConfirmingDelete(false);
-        setShowPinPanel(true);
-      } else {
-        setDeleteError("Couldn't delete the document.");
-      }
+      setDeleteError(
+        isRoleRejection(err)
+          ? "Deleting a document needs a manager or admin role."
+          : "Couldn't delete the document.",
+      );
     } finally {
       setDeleting(false);
     }
@@ -421,13 +369,15 @@ export default function ClinicalDocuments({ user, patientApiId }: Props) {
                 </button>
               </>
             )}
-            <button
-              className="btn btn-danger"
-              type="button"
-              onClick={startDelete}
-            >
-              Delete
-            </button>
+            {isManager && (
+              <button
+                className="btn btn-danger"
+                type="button"
+                onClick={startDelete}
+              >
+                Delete
+              </button>
+            )}
             <button
               className="btn btn-secondary"
               type="button"
@@ -437,47 +387,12 @@ export default function ClinicalDocuments({ user, patientApiId }: Props) {
             </button>
           </div>
 
-          {showPinPanel && (
-            <form className="pin-panel" onSubmit={submitPin}>
-              <label>
-                Manager PIN required to delete this document
-                <input
-                  type="password"
-                  inputMode="numeric"
-                  autoComplete="off"
-                  value={pinEntry}
-                  onChange={(e) => setPinEntry(e.target.value)}
-                  placeholder="PIN"
-                />
-              </label>
-              {pinError && <p className="pin-error">{pinError}</p>}
-              <div className="profile-actions">
-                <button
-                  className="btn btn-primary"
-                  type="submit"
-                  disabled={pinChecking}
-                >
-                  {pinChecking ? "Verifying…" : "Unlock"}
-                </button>
-                <button
-                  className="btn btn-secondary"
-                  type="button"
-                  onClick={() => setShowPinPanel(false)}
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
-          )}
           {confirmingDelete && (
             <div className="pin-panel">
               <p>
                 Delete this document? It will be removed from the
                 chart (soft delete).
               </p>
-              {authorizingManager && (
-                <p>Authorized by {authorizingManager} (manager PIN).</p>
-              )}
               {deleteError && <p className="pin-error">{deleteError}</p>}
               <div className="profile-actions">
                 <button

@@ -30,7 +30,8 @@
 const express = require('express');
 const pool = require('../db');
 const { insertEvent } = require('../lib/eventLog');
-const requireManagerPin = require('../lib/requireManagerPin');
+const { requireRole, attachManager } = require('../lib/requireRole');
+const requireManagerRole = requireRole('manager', 'admin');
 const {
   DOCUMENT_TEMPLATES,
   DOC_TYPES,
@@ -314,7 +315,7 @@ router.post('/:id/finalize', async (req, res, next) => {
   }
 });
 
-router.delete('/:id', requireManagerPin, async (req, res, next) => {
+router.delete('/:id', requireManagerRole, async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id)) return res.status(400).json({ error: 'id must be an integer' });
@@ -346,7 +347,7 @@ router.delete('/:id', requireManagerPin, async (req, res, next) => {
   }
 });
 
-router.post('/:id/restore', requireManagerPin, async (req, res, next) => {
+router.post('/:id/restore', requireManagerRole, async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id)) return res.status(400).json({ error: 'id must be an integer' });

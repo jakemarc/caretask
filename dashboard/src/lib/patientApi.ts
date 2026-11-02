@@ -300,7 +300,7 @@ async function apiFetch(
     signal: AbortSignal.timeout(5000),
   });
   if (!res.ok) {
-    // Surface the API's error code (e.g. PIN_REQUIRED / PIN_INVALID on
+    // Surface the API's error code (e.g. ROLE_REQUIRED on
     // manager-gated writes) alongside the status, so callers can react
     // specifically instead of treating every failure as a dead API.
     let code: string | undefined;
@@ -329,31 +329,14 @@ export interface ApiRequestError extends Error {
   code?: string;
 }
 
-// True when the API rejected a manager-gated write over its PIN
-// (missing or incorrect). Callers use this to send the user back to
-// the PIN prompt instead of reporting a generic save failure.
-export function isPinRejection(err: unknown): boolean {
+// True when the API rejected a manager-gated write because the
+// caller's staff role is not manager/admin (or the caller has no
+// staff record at all). Callers use this to explain the failure
+// plainly instead of reporting a generic save failure. (The
+// manager PIN was retired on 2026-11-02 in favor of role gates.)
+export function isRoleRejection(err: unknown): boolean {
   const e = err as ApiRequestError | null;
-  return e?.code === "PIN_REQUIRED" || e?.code === "PIN_INVALID";
-}
-
-// Check a manager PIN against the API (POST /users/verify-pin). The
-// PIN itself is verified SERVER-side against the stored hash — the
-// dashboard never holds a PIN to compare against. Resolves with the
-// authorizing manager's identity; rejects with a 403 ApiRequestError
-// when no active manager/admin has that PIN.
-export async function verifyManagerPin(
-  user: User,
-  pin: string,
-): Promise<{ id: number; email: string; role: string; name: string }> {
-  const out = (await apiFetch(user, "/users/verify-pin", {
-    method: "POST",
-    body: JSON.stringify({ pin }),
-  })) as {
-    ok: boolean;
-    manager: { id: number; email: string; role: string; name: string };
-  };
-  return out.manager;
+  return e?.code === "ROLE_REQUIRED" || e?.code === "NO_STAFF_RECORD";
 }
 
 export async function listPatients(
@@ -402,21 +385,19 @@ export async function createPatient(
 }
 
 // Update an existing patient (PUT /patients/:id). Partial payloads
-// are fine — fields not sent keep their stored values. MANAGER-GATED:
-// the API requires a valid manager PIN in the X-Manager-Pin header
-// and rejects with 403 PIN_REQUIRED / PIN_INVALID without one.
+// are fine — fields not sent keep their stored values. NOT gated:
+// clinicians manage their own patients — a status change to hold
+// or discharged is how a clinician takes someone off their list.
 export async function updatePatient(
   user: User,
   id: string,
   input: Partial<NewApiPatient>,
-  pin: string,
 ): Promise<PersonUnderCare> {
   const row = (await apiFetch(
     user,
     `/patients/${encodeURIComponent(id)}`,
     {
       method: "PUT",
-      headers: { "X-Manager-Pin": pin },
       body: JSON.stringify(input),
     },
   )) as ApiPatient;
@@ -424,7 +405,8 @@ export async function updatePatient(
 }
 
 // Soft-delete a patient (the API keeps the row, sets deleted_at).
-// MANAGER-GATED, same as updatePatient.
+// ROLE-GATED (manager/admin) — true deletion is a manager act;
+// clinicians remove patients from their list via status instead.
 export interface ApiMessage {
   id: string;
   thread_id: string;
@@ -518,25 +500,22 @@ export async function deleteMessage(user: User, id: string): Promise<void> {
 export async function deletePatient(
   user: User,
   id: string,
-  pin: string,
 ): Promise<void> {
   await apiFetch(user, `/patients/${encodeURIComponent(id)}`, {
     method: "DELETE",
-    headers: { "X-Manager-Pin": pin },
   });
 }
 
-// Undo a soft delete (the API clears deleted_at). MANAGER-GATED,
-// same as updatePatient.
+// Undo a soft delete (the API clears deleted_at). ROLE-GATED
+// (manager/admin), same as deletePatient.
 export async function restorePatient(
   user: User,
   id: string,
-  pin: string,
 ): Promise<PersonUnderCare> {
   const row = (await apiFetch(
     user,
     `/patients/${encodeURIComponent(id)}/restore`,
-    { method: "POST", headers: { "X-Manager-Pin": pin } },
+    { method: "POST" },
   )) as ApiPatient;
   return toPersonUnderCare(row);
 }
@@ -680,13 +659,12 @@ export async function getPatientAudit(
 // ---------------------------------------------------------------- staff
 //
 // The users table (staff directory) client. Reads are plain
-// authenticated calls; every WRITE is manager-gated exactly like
-// patient edit/delete — the caller passes the verified manager PIN
-// and the API re-checks it server-side (X-Manager-Pin). "Delete" is
+// authenticated calls; every WRITE is gated on the CALLER's staff
+// role — the API requires an active manager/admin users row and
+// rejects with 403 ROLE_REQUIRED otherwise (the manager PIN was
+// retired on 2026-11-02 in favor of role gates). "Delete" is
 // a deactivate: the API sets active = false and keeps the row;
-// restoreStaff undoes it. pin_hash is never returned by the API —
-// rows carry has_pin instead. A write may carry `pin` in the input
-// to SET that staff member's own PIN (hashed server-side).
+// restoreStaff undoes it.
 
 export type StaffRole =
   | "clinician"
@@ -822,63 +800,64 @@ export interface StaffInput {
   state_license_number?: string | null;
   phone?: string | null;
   phonecell?: string | null;
-  pin?: string; // set/replace this member's own PIN (write-only)
 }
 
 export async function listUsers(user: User): Promise<ApiUser[]> {
   return (await apiFetch(user, "/users")) as ApiUser[];
 }
 
-// Create a staff member. MANAGER-GATED (PIN in the header).
+// The signed-in user's own staff record (GET /users/me), or null
+// when they have none. The dashboard reads the role to show or
+// hide manager-only actions; the API stays the enforcement.
+export async function fetchMyStaffRecord(
+  user: User,
+): Promise<ApiUser | null> {
+  return (await apiFetch(user, "/users/me")) as ApiUser | null;
+}
+
+// Create a staff member. ROLE-GATED (manager/admin).
 export async function createStaff(
   user: User,
   input: StaffInput,
-  pin: string,
 ): Promise<ApiUser> {
   return (await apiFetch(user, "/users", {
     method: "POST",
-    headers: { "X-Manager-Pin": pin },
     body: JSON.stringify(input),
   })) as ApiUser;
 }
 
-// Update a staff member (partial payloads fine). MANAGER-GATED.
+// Update a staff member (partial payloads fine). ROLE-GATED.
 export async function updateStaff(
   user: User,
   id: string,
   input: StaffInput,
-  pin: string,
 ): Promise<ApiUser> {
   return (await apiFetch(user, `/users/${encodeURIComponent(id)}`, {
     method: "PUT",
-    headers: { "X-Manager-Pin": pin },
     body: JSON.stringify(input),
   })) as ApiUser;
 }
 
 // Deactivate a staff member (active = false; the row stays).
-// MANAGER-GATED.
+// ROLE-GATED.
 export async function deactivateStaff(
   user: User,
   id: string,
-  pin: string,
 ): Promise<void> {
   await apiFetch(user, `/users/${encodeURIComponent(id)}`, {
     method: "DELETE",
-    headers: { "X-Manager-Pin": pin },
   });
 }
 
-// Reactivate a deactivated staff member. MANAGER-GATED.
+// Reactivate a deactivated staff member. ROLE-GATED.
 export async function restoreStaff(
   user: User,
   id: string,
-  pin: string,
 ): Promise<ApiUser> {
   return (await apiFetch(
     user,
     `/users/${encodeURIComponent(id)}/restore`,
-    { method: "POST", headers: { "X-Manager-Pin": pin } },
+    { method: "POST" },
   )) as ApiUser;
 }
 
@@ -961,16 +940,14 @@ export async function listAppointmentCategories(
   return out.categories;
 }
 
-// Category writes are MANAGER-GATED (PIN in the header) — categories
+// Category writes are ROLE-GATED (manager/admin) — categories
 // are practice configuration, edited from the Settings screen.
 export async function createAppointmentCategory(
   user: User,
   input: CategoryInput,
-  pin: string,
 ): Promise<AppointmentCategory> {
   const out = (await apiFetch(user, "/appointments/categories", {
     method: "POST",
-    headers: { "X-Manager-Pin": pin },
     body: JSON.stringify(input),
   })) as { category: AppointmentCategory };
   return out.category;
@@ -980,14 +957,12 @@ export async function updateAppointmentCategory(
   user: User,
   id: string,
   input: CategoryInput,
-  pin: string,
 ): Promise<AppointmentCategory> {
   const out = (await apiFetch(
     user,
     `/appointments/categories/${encodeURIComponent(id)}`,
     {
       method: "PUT",
-      headers: { "X-Manager-Pin": pin },
       body: JSON.stringify(input),
     },
   )) as { category: AppointmentCategory };
@@ -997,24 +972,22 @@ export async function updateAppointmentCategory(
 export async function deactivateAppointmentCategory(
   user: User,
   id: string,
-  pin: string,
 ): Promise<void> {
   await apiFetch(
     user,
     `/appointments/categories/${encodeURIComponent(id)}`,
-    { method: "DELETE", headers: { "X-Manager-Pin": pin } },
+    { method: "DELETE" },
   );
 }
 
 export async function restoreAppointmentCategory(
   user: User,
   id: string,
-  pin: string,
 ): Promise<AppointmentCategory> {
   const out = (await apiFetch(
     user,
     `/appointments/categories/${encodeURIComponent(id)}/restore`,
-    { method: "POST", headers: { "X-Manager-Pin": pin } },
+    { method: "POST" },
   )) as { category: AppointmentCategory };
   return out.category;
 }
@@ -1040,7 +1013,7 @@ export async function listAppointments(
   return out.appointments;
 }
 
-// Create is NOT PIN-gated (front-desk booking, like patient intake).
+// Create is NOT gated (front-desk booking, like patient intake).
 export async function createAppointment(
   user: User,
   input: AppointmentInput,
@@ -1052,19 +1025,18 @@ export async function createAppointment(
   return out.appointment;
 }
 
-// Update is MANAGER-GATED (PIN in the header).
+// Update is NOT gated — rescheduling stays frictionless (this is
+// what makes drag-to-another-day work without a prompt).
 export async function updateAppointment(
   user: User,
   id: string,
   input: Partial<AppointmentInput>,
-  pin: string,
 ): Promise<ApiAppointment> {
   const out = (await apiFetch(
     user,
     `/appointments/${encodeURIComponent(id)}`,
     {
       method: "PUT",
-      headers: { "X-Manager-Pin": pin },
       body: JSON.stringify(input),
     },
   )) as { appointment: ApiAppointment };
@@ -1085,15 +1057,13 @@ export async function setAppointmentStatus(
   return out.appointment;
 }
 
-// Soft delete. MANAGER-GATED.
+// Soft delete. ROLE-GATED (manager/admin).
 export async function deleteAppointment(
   user: User,
   id: string,
-  pin: string,
 ): Promise<void> {
   await apiFetch(user, `/appointments/${encodeURIComponent(id)}`, {
     method: "DELETE",
-    headers: { "X-Manager-Pin": pin },
   });
 }
 
@@ -1103,7 +1073,7 @@ export async function deleteAppointment(
 // dataset p7mg-cnpx), synced server-side by the API / the weekly
 // timer. Reads are open to signed-in staff; every write is a
 // LOCAL field (is_primary / notes / short_name) behind the
-// manager PIN, and "Sync now" is PIN-gated too. display_name is
+// manager/admin role, and "Sync now" is role-gated too. display_name is
 // computed by the API (short_name → embedded DBA → first two
 // words → full name); name is always the full legal name.
 
@@ -1237,7 +1207,6 @@ export async function fetchAgencySyncStatus(
 
 export async function updateAgency(
   user: User,
-  pin: string,
   id: number,
   fields: {
     is_primary?: boolean;
@@ -1251,7 +1220,6 @@ export async function updateAgency(
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
-      "X-Manager-Pin": pin,
     },
     body: JSON.stringify(fields),
   });
@@ -1270,14 +1238,12 @@ export async function updateAgency(
 
 export async function syncAgenciesNow(
   user: User,
-  pin: string,
 ): Promise<AgencySyncSummary> {
   const token = await user.getIdToken();
   const res = await fetch(`${apiBase()}/agencies/sync`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
-      "X-Manager-Pin": pin,
     },
   });
   if (!res.ok) {
@@ -1299,8 +1265,9 @@ export async function syncAgenciesNow(
 // tied to a patient, optionally to an appointment. Sections are a
 // Record of section key → text. Drafts are editable; finalizing
 // locks the document (the API rejects further edits with
-// DOCUMENT_FINALIZED). Update and finalize are NOT PIN-gated;
-// delete and restore are MANAGER-GATED like patient delete.
+// DOCUMENT_FINALIZED). Update and finalize are NOT gated;
+// delete and restore are ROLE-GATED (manager/admin) like
+// patient delete.
 
 export type DocStatus = "draft" | "finalized";
 
@@ -1365,7 +1332,7 @@ export async function createDocument(
   return out.document;
 }
 
-// Update a draft document (NOT PIN-gated). The API rejects edits to
+// Update a draft document (not gated). The API rejects edits to
 // a finalized document with code DOCUMENT_FINALIZED.
 export async function updateDocument(
   user: User,
@@ -1401,29 +1368,26 @@ export async function finalizeDocument(
 }
 
 // Soft-delete a document (the API keeps the row, sets deleted_at).
-// MANAGER-GATED.
+// ROLE-GATED (manager/admin).
 export async function deleteDocument(
   user: User,
   id: string,
-  pin: string,
 ): Promise<void> {
   await apiFetch(user, `/documents/${encodeURIComponent(id)}`, {
     method: "DELETE",
-    headers: { "X-Manager-Pin": pin },
   });
 }
 
-// Undo a soft delete (the API clears deleted_at). MANAGER-GATED,
+// Undo a soft delete (the API clears deleted_at). ROLE-GATED,
 // same as deleteDocument.
 export async function restoreDocument(
   user: User,
   id: string,
-  pin: string,
 ): Promise<ApiDocument> {
   const out = (await apiFetch(
     user,
     `/documents/${encodeURIComponent(id)}/restore`,
-    { method: "POST", headers: { "X-Manager-Pin": pin } },
+    { method: "POST" },
   )) as { document: ApiDocument };
   return out.document;
 }

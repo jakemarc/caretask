@@ -3,7 +3,7 @@ import AgencySyncPanel from "./AgencySyncPanel";
 
 // Settings → Agency directory. The same sync the Agency tab
 // runs ("Sync now" there, "Update agencies" here) against the
-// same PIN-gated POST /agencies/sync — one directory, two doors.
+// same role-gated POST /agencies/sync — one directory, two doors.
 // Patterned on Settings → Visit categories: a self-contained
 // article in the Settings card list.
 

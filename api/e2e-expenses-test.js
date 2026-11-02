@@ -177,19 +177,24 @@ async function main() {
       body: { entry_date: '2026-10-08', business_miles: 5 },
     });
     check('add after submit → 409 REPORT_LOCKED', lockedAdd.res.status === 409 && lockedAdd.json.code === 'REPORT_LOCKED', `got ${lockedAdd.res.status}`);
-    const noPin = await call('POST', `/expense-reports/${rid}/approve`, { as: 'mgr' });
-    check('approve without PIN → 403 PIN_REQUIRED', noPin.res.status === 403 && noPin.json.code === 'PIN_REQUIRED', `got ${noPin.res.status} ${JSON.stringify(noPin.json)}`);
-    const badPin = await call('POST', `/expense-reports/${rid}/approve`, { as: 'mgr', pin: '9999' });
-    check('approve with wrong PIN → 403 PIN_INVALID', badPin.res.status === 403 && badPin.json.code === 'PIN_INVALID');
-    const reject = await call('POST', `/expense-reports/${rid}/reject`, { as: 'mgr', pin: TEST_PIN });
-    check('reject → back to draft', reject.res.status === 200 && reject.json.report.status === 'draft' && !reject.json.report.submitted_at);
+    // Role gates (manager PIN retired 2026-11-02): clinicians
+    // cannot approve at all; the manager needs no PIN.
+    const byOther = await call('POST', `/expense-reports/${rid}/approve`, { as: 'other' });
+    check('approve as clinician → 403 ROLE_REQUIRED', byOther.res.status === 403 && byOther.json.code === 'ROLE_REQUIRED', `got ${byOther.res.status} ${JSON.stringify(byOther.json)}`);
+    const reject = await call('POST', `/expense-reports/${rid}/reject`, { as: 'mgr' });
+    check('reject as manager → back to draft', reject.res.status === 200 && reject.json.report.status === 'draft' && !reject.json.report.submitted_at);
     const resubmit = await call('POST', `/expense-reports/${rid}/submit`);
     check('resubmit ok', resubmit.json.report.status === 'submitted');
-    const approve = await call('POST', `/expense-reports/${rid}/approve`, { as: 'mgr', pin: TEST_PIN });
-    check('approve with PIN → approved', approve.res.status === 200 && approve.json.report.status === 'approved', JSON.stringify(approve.json));
+    const approve = await call('POST', `/expense-reports/${rid}/approve`, { as: 'mgr' });
+    check('approve as manager → approved', approve.res.status === 200 && approve.json.report.status === 'approved', JSON.stringify(approve.json));
     check('approved_by recorded', typeof approve.json.report.approved_by === 'number');
-    const pay = await call('POST', `/expense-reports/${rid}/pay`, { as: 'mgr', pin: TEST_PIN, body: { payment_ref: 'ACH-1001' } });
-    check('pay → paid + ref', pay.res.status === 200 && pay.json.report.status === 'paid' && pay.json.report.payment_ref === 'ACH-1001');
+    const pay = await call('POST', `/expense-reports/${rid}/pay`, { as: 'mgr', body: { payment_ref: 'ACH-1001' } });
+    check('pay as manager → paid + ref', pay.res.status === 200 && pay.json.report.status === 'paid' && pay.json.report.payment_ref === 'ACH-1001');
+    // A manager cannot process their OWN report.
+    const own = await call('POST', '/expense-reports', { as: 'mgr', body: { period_start: '2026-12-01', period_end: '2026-12-31', title: 'Manager own report' } });
+    await call('POST', `/expense-reports/${own.json.report.id}/submit`, { as: 'mgr' });
+    const selfApprove = await call('POST', `/expense-reports/${own.json.report.id}/approve`, { as: 'mgr' });
+    check('manager approving OWN report → 403 SELF_APPROVAL', selfApprove.res.status === 403 && selfApprove.json.code === 'SELF_APPROVAL', `got ${selfApprove.res.status} ${JSON.stringify(selfApprove.json)}`);
 
     console.log('unrated miles + soft delete:');
     const c2 = await call('POST', '/expense-reports', { body: { period_start: '2026-11-01', period_end: '2026-11-30', title: 'November mileage' } });
