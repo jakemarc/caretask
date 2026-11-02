@@ -6,6 +6,22 @@ built and verified but not deployed.
 
 ## 2026-11-02
 
+- **Mobile Patients title as a docked BAR — Live 2026-11-02
+  (deploy-23: dashboard bundle `index-FIx8xYCu.js`, deployment
+  https://a68c0874.marcinnotech-app.pages.dev, verified —
+  Cloudflare API reports it as the canonical production
+  deployment and the deployment URL serves the new bundle;
+  deploy-20 token reused).** Jake asked for a docked bar
+  instead of the pill so the title can't go under the floating
+  buttons (superseding deploy-22 within the hour): the page
+  head is now a full-width fixed bar (72px, glass, bottom
+  border) across the top; the menu and view-toggle circles
+  (z 60) render ON the bar (z 59) as one piece of chrome, the
+  title is plain centered text in the bar, and Add Patient
+  sits in the bar left of the toggle circle. The floating
+  search moved down to clear the bar (top 84px; filter popover
+  142px; count note margin 128px). Forced-desktop un-docks the
+  bar back to the normal head row.
 - **Mobile Patients title DOCKED — Live 2026-11-02 (deploy-22:
   dashboard bundle `index-Cn9eNyDA.js`, deployment
   https://5144d7cd.marcinnotech-app.pages.dev, verified —

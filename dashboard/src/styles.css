@@ -3215,7 +3215,7 @@ label.contact-picker-row {
   .patients-floating-search {
     display: flex;
     position: fixed;
-    top: 74px;
+    top: 84px;
     left: 14px;
     right: 14px;
     z-index: 55;
@@ -3279,7 +3279,7 @@ label.contact-picker-row {
   .patients-filter-popover {
     display: block;
     position: fixed;
-    top: 130px;
+    top: 142px;
     left: 14px;
     right: 14px;
     z-index: 55;
@@ -3326,7 +3326,7 @@ label.contact-picker-row {
 
   .mobile-count-note {
     display: block;
-    margin: 118px 0 10px;
+    margin: 128px 0 10px;
   }
 
   /* Title fix (Jake, 2026-11-02): the page head rendered AFTER
@@ -3347,14 +3347,28 @@ label.contact-picker-row {
      put while the list scrolls under it. The strip itself never
      intercepts taps; only the Add Patient button (parked at the
      strip's right end, just left of the toggle circle) is live. */
+  /* Docked BAR (Jake, 2026-11-02, superseding the deploy-22
+     pill): the page head is a full-width fixed bar across the
+     top. The floating menu/toggle circles (z 60) sit ON the bar
+     (z 59), so the title can never slide under them; the bar is
+     one coherent piece of chrome. Taps pass through except on
+     the Add Patient button, parked left of the toggle circle. */
   .patient-list-panel .list-page-head {
     position: fixed;
-    top: 14px;
-    left: 64px;
-    right: 64px;
-    z-index: 60;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 72px;
+    padding: 0 14px;
+    z-index: 59;
     margin: 0;
+    align-items: center;
     justify-content: center;
+    background: color-mix(in srgb, var(--panel) 82%, transparent);
+    -webkit-backdrop-filter: blur(14px);
+    backdrop-filter: blur(14px);
+    border-bottom: 1px solid var(--border);
+    box-shadow: 0 6px 20px rgba(10, 25, 22, 0.1);
     pointer-events: none;
   }
 
@@ -3362,19 +3376,12 @@ label.contact-picker-row {
     font-size: 17px;
     font-weight: 700;
     line-height: 1;
-    padding: 13px 22px;
-    border-radius: 999px;
     color: var(--text);
-    background: color-mix(in srgb, var(--panel) 66%, transparent);
-    -webkit-backdrop-filter: blur(12px);
-    backdrop-filter: blur(12px);
-    border: 1px solid var(--border);
-    box-shadow: 0 8px 22px rgba(10, 25, 22, 0.16);
   }
 
   .patient-list-panel .list-page-head .add-patient-btn {
     position: absolute;
-    right: 0;
+    right: 70px;
     top: 50%;
     transform: translateY(-50%);
     pointer-events: auto;
@@ -3487,8 +3494,15 @@ label.contact-picker-row {
 
 .force-desktop .patient-list-panel .list-page-head {
   position: static;
+  height: auto;
+  padding: 0;
   margin: 0 0 16px;
   justify-content: space-between;
+  background: transparent;
+  border-bottom: 0;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
   pointer-events: auto;
 }
 
@@ -3505,6 +3519,7 @@ label.contact-picker-row {
 
 .force-desktop .patient-list-panel .list-page-head .add-patient-btn {
   position: static;
+  right: auto;
   transform: none;
 }
 
