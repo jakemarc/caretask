@@ -292,6 +292,36 @@ browser.
 Suite: `e2e-news-test.js` (10 checks against fixture RSS/Atom
 servers — the suite needs no database; all passing 2026-11-02).
 
+## Appointment series (routes/appointments.js) — Live 2026-11-02 (deploy-32)
+
+Repeating visits are ordinary appointment rows linked by
+`appointments.series_id` (UUID, nullable;
+`schema-appointment-series.sql`), so one visit can move or
+cancel without touching the rest.
+
+- `POST /appointments/series` (ungated) — body = the normal
+  appointment fields + `duration_min` (5–480) + `visits`
+  (1–60 ISO start times). Validates like a single create
+  (category / patient / provider / status rules), then inserts
+  every visit in ONE transaction under one fresh series_id;
+  one `appointment_create` event per visit (details carry
+  series_id). Errors: 400 `SERIES_VISITS_REQUIRED` /
+  `SERIES_TOO_LARGE` / the usual codes.
+- `PUT /appointments/series/:seriesId` (ungated, like the
+  single PUT) — applies category_id / provider_id / title /
+  room / notes to every live member; dates and times are
+  per-visit BY DESIGN and never change here. One
+  `appointment_series_update` event. 404 `SERIES_NOT_FOUND`.
+- `DELETE /appointments/:id?scope=series` (manager/admin, like
+  the single delete) — soft-deletes every live member; the
+  response row carries `series_deleted_count`; one
+  `appointment_series_delete` event.
+- CORS (2026-11-02): besides DASHBOARD_ORIGIN, per-deployment
+  preview origins `https://<hash>.marcinnotech-app.pages.dev`
+  are allowed, so a preview build can be checked against the
+  live API before going canonical (the Places browser key got
+  the matching referrer entry the same day).
+
 ## Role gates (lib/requireRole.js) — replaced the manager-PIN gate 2026-11-02
 
 Jake's decision (2026-11-02): "Remove the PIN — role gates
@@ -361,10 +391,12 @@ carry ids and doc_type only — never title or section content.
   rows) is still future API work.
 - Audit snapshots include `ss` / `drivers_license` verbatim —
   redaction is required before any real data (see ARCHITECTURE.md).
-- Appointments: no recurrence yet (OpenEMR's
-  pc_recurrtype/pc_recurrspec series + edit-one/future/all is a
-  deliberate deferral), no facility/billing-facility fields (no
-  facility table yet). Categories are editable in Settings →
+- Appointments: recurrence ships as the series model above
+  (Jake's staggered-phase builder, 2026-11-02) — deliberately
+  NOT OpenEMR's pc_recurrtype spec: no stored recurrence rule,
+  no edit-future split; a series is just linked rows. Still
+  open: facility/billing-facility fields (no facility table
+  yet). Categories are editable in Settings →
   Visit categories (role-gated); statuses are still seeded data
   only (`seed-appointment-lists.js`), no admin UI.
   **Status model v2 (Jake, 2026-11-02; LIVE as deploy-31 —

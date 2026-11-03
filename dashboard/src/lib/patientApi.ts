@@ -1014,6 +1014,8 @@ export interface ApiAppointment {
   status: string;
   room: string | null;
   notes: string | null;
+  // Repeating-visits series link (2026-11-02); null for one-offs.
+  series_id: string | null;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
@@ -1161,14 +1163,54 @@ export async function setAppointmentStatus(
   return out.appointment;
 }
 
-// Soft delete. ROLE-GATED (manager/admin).
+// Soft delete. ROLE-GATED (manager/admin). With scope "series"
+// every live member of the appointment's series is deleted in
+// the same act (2026-11-02).
 export async function deleteAppointment(
   user: User,
   id: string,
+  scope?: "series",
 ): Promise<void> {
-  await apiFetch(user, `/appointments/${encodeURIComponent(id)}`, {
+  const q = scope === "series" ? "?scope=series" : "";
+  await apiFetch(user, `/appointments/${encodeURIComponent(id)}${q}`, {
     method: "DELETE",
   });
+}
+
+// ---- Appointment series (2026-11-02) --------------------------
+// The dashboard computes the visit start times (the staggered
+// phase builder lives in CalendarView); the API creates them in
+// one transaction under one series_id.
+
+export interface AppointmentSeriesInput extends AppointmentInput {
+  duration_min: number;
+  visits: string[]; // ISO start times, one per visit
+}
+
+export async function createAppointmentSeries(
+  user: User,
+  input: AppointmentSeriesInput,
+): Promise<{ series_id: string; appointments: ApiAppointment[] }> {
+  return (await apiFetch(user, "/appointments/series", {
+    method: "POST",
+    body: JSON.stringify(input),
+  })) as { series_id: string; appointments: ApiAppointment[] };
+}
+
+// Series-wide field edit (category / provider / title / room /
+// notes) — NOT gated, like the single-appointment PUT. Dates
+// and times are per-visit and are not touched.
+export async function updateAppointmentSeries(
+  user: User,
+  seriesId: string,
+  input: Partial<AppointmentInput>,
+): Promise<ApiAppointment[]> {
+  const out = (await apiFetch(
+    user,
+    `/appointments/series/${encodeURIComponent(seriesId)}`,
+    { method: "PUT", body: JSON.stringify(input) },
+  )) as { appointments: ApiAppointment[] };
+  return out.appointments;
 }
 
 // ------------------------------------------------------------------

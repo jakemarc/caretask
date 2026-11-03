@@ -32,6 +32,7 @@
 // category requires a live patient; a 'provider' category (In
 // Office, Lunch, Vacation…) takes no patient.
 const express = require('express');
+const { randomUUID } = require('node:crypto');
 const pool = require('../db');
 const { insertEvent } = require('../lib/eventLog');
 const { requireRole, attachManager } = require('../lib/requireRole');
@@ -60,6 +61,7 @@ const SELECT = `
          a.category_id, c.name AS category_name, c.color AS category_color,
          c.cattype, c.default_duration_min,
          a.title, a.starts_at, a.ends_at, a.status, a.room, a.notes,
+         a.series_id,
          a.created_at, a.updated_at, a.deleted_at
     FROM appointments a
     LEFT JOIN patients p ON p.id = a.patient_id
@@ -184,7 +186,7 @@ function validate(body, { partial = false } = {}) {
     }
   }
   if (!partial || has('status')) {
-    out.status = body.status ?? 'booked';
+    out.status = body.status ?? 'scheduled';
     if (typeof out.status !== 'string') {
       throw httpError(400, 'status must be a string', 'VALIDATION');
     }
@@ -495,6 +497,161 @@ router.post('/', async (req, res, next) => {
   }
 });
 
+// ---- Series (Jake, 2026-11-02) --------------------------------
+// A series is a set of ordinary appointment rows created in one
+// act (the repeating-visits builder) and linked by series_id.
+// Members stay independent rows: moving or cancelling one never
+// touches the rest. Series-wide acts live here: create-many,
+// field edits (category / provider / title / room / notes), and
+// delete via DELETE /:id?scope=series below. Times and dates are
+// per-visit by design — reschedule a visit on its own, or delete
+// the series and rebuild it.
+router.post('/series', async (req, res, next) => {
+  try {
+    const body = req.body ?? {};
+    const { visits, duration_min: durationMin, ...rest } = body;
+    if (!Array.isArray(visits) || visits.length === 0) {
+      throw httpError(400, 'visits must be a non-empty array of ISO date-times', 'SERIES_VISITS_REQUIRED');
+    }
+    if (visits.length > 60) {
+      throw httpError(400, 'a series is capped at 60 visits', 'SERIES_TOO_LARGE');
+    }
+    if (!Number.isInteger(durationMin) || durationMin < 5 || durationMin > 480) {
+      throw httpError(400, 'duration_min must be an integer between 5 and 480', 'VALIDATION');
+    }
+    const starts = visits.map((v) => {
+      const d = parseTime(v);
+      if (!d) throw httpError(400, 'each visit must be an ISO date-time', 'VALIDATION');
+      return d;
+    });
+    starts.sort((x, y) => x - y);
+    const values = validate({
+      ...rest,
+      starts_at: starts[0].toISOString(),
+      ends_at: new Date(starts[0].getTime() + durationMin * 60000).toISOString(),
+    });
+    const seriesId = randomUUID();
+    const created = await withTx(async (client) => {
+      await checkRefs(client, values);
+      const cat = await client.query(
+        'SELECT name, cattype FROM appointment_categories WHERE id = $1',
+        [values.category_id],
+      );
+      if (cat.rows[0].cattype === 'provider') values.patient_id = null;
+      const rows = [];
+      for (const start of starts) {
+        const end = new Date(start.getTime() + durationMin * 60000);
+        const r = await client.query(
+          `INSERT INTO appointments (patient_id, provider_id, category_id, title, starts_at, ends_at, status, room, notes, series_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+          [
+            values.patient_id,
+            values.provider_id,
+            values.category_id,
+            values.title ?? cat.rows[0].name,
+            start.toISOString(),
+            end.toISOString(),
+            values.status,
+            values.room ?? null,
+            values.notes ?? null,
+            seriesId,
+          ],
+        );
+        const row = await fetchOne(client, r.rows[0].id);
+        await insertEvent(client, {
+          actor: req.user,
+          event: 'appointment_change',
+          patientId: values.patient_id,
+          details: {
+            action: 'appointment_create',
+            appointment_id: Number(row.id),
+            series_id: seriesId,
+          },
+          ip: req.ip,
+        });
+        rows.push(row);
+      }
+      return rows;
+    });
+    res.status(201).json({ series_id: seriesId, appointments: created });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message, code: err.code });
+    next(err);
+  }
+});
+
+// Series-wide field edit: category / provider / title / room /
+// notes applied to every live member. Ungated, like the single
+// appointment PUT (deploy-26 role model); dates/times are NOT
+// touched (per-visit by design).
+router.put('/series/:seriesId', attachManager, async (req, res, next) => {
+  try {
+    const seriesId = req.params.seriesId;
+    if (!UUID_RE.test(seriesId)) {
+      return res.status(400).json({ error: 'series id must be a UUID' });
+    }
+    const patch = validate(req.body ?? {}, { partial: true });
+    const allowed = ['category_id', 'provider_id', 'title', 'room', 'notes'];
+    const sets = [];
+    const params = [];
+    for (const k of allowed) {
+      if (Object.prototype.hasOwnProperty.call(patch, k)) {
+        params.push(patch[k]);
+        sets.push(`${k} = $${params.length}`);
+      }
+    }
+    if (sets.length === 0) {
+      return res.status(400).json({ error: 'nothing to update', code: 'VALIDATION' });
+    }
+    const updated = await withTx(async (client) => {
+      const members = await client.query(
+        'SELECT * FROM appointments WHERE series_id = $1 AND deleted_at IS NULL ORDER BY starts_at',
+        [seriesId],
+      );
+      if (members.rows.length === 0) return null;
+      if (patch.category_id !== undefined || patch.provider_id !== undefined) {
+        const first = members.rows[0];
+        await checkRefs(client, {
+          category_id: patch.category_id ?? first.category_id,
+          provider_id: patch.provider_id !== undefined ? patch.provider_id : first.provider_id,
+          patient_id: first.patient_id,
+          status: first.status,
+          starts_at: first.starts_at,
+          ends_at: first.ends_at,
+        });
+      }
+      params.push(seriesId);
+      await client.query(
+        `UPDATE appointments SET ${sets.join(', ')}, updated_at = now()
+          WHERE series_id = $${params.length} AND deleted_at IS NULL`,
+        params,
+      );
+      await insertEvent(client, {
+        actor: req.user,
+        event: 'appointment_change',
+        patientId: members.rows[0].patient_id,
+        details: {
+          action: 'appointment_series_update',
+          series_id: seriesId,
+          count: members.rows.length,
+          fields: sets.map((s) => s.split(' = ')[0]),
+        },
+        ip: req.ip,
+      });
+      const r = await client.query(
+        `${SELECT} WHERE a.series_id = $1 AND a.deleted_at IS NULL ORDER BY a.starts_at`,
+        [seriesId],
+      );
+      return r.rows;
+    });
+    if (!updated) return res.status(404).json({ error: 'series not found', code: 'SERIES_NOT_FOUND' });
+    res.json({ series_id: seriesId, appointments: updated });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message, code: err.code });
+    next(err);
+  }
+});
+
 router.put('/:id', attachManager, async (req, res, next) => {
   try {
     const id = Number(req.params.id);
@@ -592,6 +749,31 @@ router.delete('/:id', requireManagerRole, async (req, res, next) => {
     const deleted = await withTx(async (client) => {
       const cur = await fetchOne(client, id);
       if (!cur || cur.deleted_at) return null;
+      // ?scope=series (Jake, 2026-11-02): soft-delete every live
+      // member of this appointment's series in the same act.
+      if (req.query.scope === 'series' && cur.series_id) {
+        const r = await client.query(
+          'UPDATE appointments SET deleted_at = now() WHERE series_id = $1 AND deleted_at IS NULL RETURNING id',
+          [cur.series_id],
+        );
+        await insertEvent(client, {
+          actor: req.user,
+          event: 'appointment_change',
+          patientId: cur.patient_id,
+          details: {
+            action: 'appointment_series_delete',
+            series_id: cur.series_id,
+            count: r.rows.length,
+            manager_user_id: req.manager.id,
+            manager_email: req.manager.email,
+            manager_role: req.manager.role,
+          },
+          ip: req.ip,
+        });
+        const after = await fetchOne(client, id);
+        after.series_deleted_count = r.rows.length;
+        return after;
+      }
       await client.query('UPDATE appointments SET deleted_at = now() WHERE id = $1', [id]);
       await insertEvent(client, {
         actor: req.user,

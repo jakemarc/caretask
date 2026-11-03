@@ -114,5 +114,11 @@ day: 595 inserted). To reinstall or repair:
 - Source: dashboard + API source live in the workspace (no Git repo
   yet — open item; Jake creates repos).
 - On-VM: per-deploy `.bak-<date>` copies of replaced files.
-- Database: no automated backup is configured yet. Pre-pilot task:
-  scheduled `pg_dump` of caretask_demo with rotation.
+- Database: **automated daily backup LIVE 2026-11-02** —
+  systemd timer `caretask-backup.timer` on the VM runs
+  `/home/jakemarc2/backup-db.sh` daily at 08:15 UTC:
+  `pg_dump -Fc` of caretask_demo into
+  `/home/jakemarc2/backups/caretask-<stamp>.dump`, keeping 14
+  days. Verified end to end the day it was set up (manual run
+  + a direct service run, dumps ~425 KB). Restore = `pg_restore`
+  into a scratch database first, never over the live one.

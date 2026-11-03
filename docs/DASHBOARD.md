@@ -739,6 +739,43 @@ Rows save with their agency_id / agency_name_text / status —
 createPatient already accepted all three, so this is
 dashboard-only. Staff import is unchanged.
 
+## Entry card, series builder, drag (Live 2026-11-02, deploy-32)
+
+**Simple entry card (Jake: "as simple as a Google appointment
+entry").** Creating an appointment opens the compact card:
+patient autocomplete first, visit types as tappable chips
+(appointment-type categories), provider, one date / time /
+duration row, and the Repeats section below. **More options**
+swaps in the full form (category select incl. provider-type
+blocks, title, room, status on edit, notes); **Fewer options**
+goes back. Editing always opens the full form.
+
+**Repeats — staggered phases.** The Repeats toggle in the card
+builds a series: weekday chips (which days visits can land
+on) + stacked phases, each "k× / week for n weeks" with
+steppers. Weeks are 7-day blocks from the first date; a k×
+week takes the FIRST k chosen weekdays of its block — Jake's
+example (Mon/Wed/Fri; 1× for 1 wk → 2× for 2 wks → 1× for
+1 wk) previews "6 visits · Nov 2 – Nov 23" and produces
+exactly those dates. A live preview line shows the count and
+range. On save, the dashboard sends the computed start times
+to `POST /appointments/series`; each visit is its own
+appointment row under one series id. A series member shows a
+"↻ Series" badge (detail card, week blocks); editing one
+offers **This visit only / Whole series** (whole-series saves
+type / provider / title / room / notes for every visit —
+dates and times stay per-visit); deleting one asks **this
+visit or the whole series** (manager role, as always).
+
+**Drag between days.** Month chips and Week / 3 Day blocks
+drag with pointer events: a mouse drag arms after a few
+pixels; a touch drag arms on a ~260 ms press-and-hold so
+ordinary scrolling still works. A ghost copy follows the
+pointer, the day under it highlights, and dropping saves the
+appointment on the new day at the SAME time through the
+normal update. Clicking still selects — a drag suppresses
+the click that follows it.
+
 ## Appointment form: patient autocomplete (Live 2026-11-02, deploy-31)
 
 At Jake's direction the form's Patient dropdown is now a
