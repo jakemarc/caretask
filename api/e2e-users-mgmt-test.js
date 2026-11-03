@@ -172,6 +172,20 @@ async function main() {
     body = await res.json();
     check('deactivate as clinician is 403 ROLE_REQUIRED', res.status === 403 && body.code === 'ROLE_REQUIRED', `got ${res.status}/${body.code}`);
     await pool.query("UPDATE users SET role = 'manager' WHERE email = 'tester@example.com'");
+    // Platform fixture (2026-11-03): /users/clinicians is scoped to
+    // the caller's agency colleagues — put caller and the new
+    // clinician in one test agency so the directory check holds.
+    const agM = await pool.query(
+      `INSERT INTO agencies (license_number, name) VALUES ('E2E-MGMT', 'Mgmt Test Agency')
+       ON CONFLICT (license_number) DO UPDATE SET name = EXCLUDED.name RETURNING id`,
+    );
+    for (const em of ['tester@example.com', 'mgmt-new@example.com']) {
+      await pool.query(
+        `INSERT INTO user_agencies (user_id, agency_id)
+         SELECT id, $1 FROM users WHERE email = $2 ON CONFLICT DO NOTHING`,
+        [agM.rows[0].id, em],
+      );
+    }
     res = await fetch(`${BASE}/users/clinicians`);
     body = await res.json();
     check('clinicians list includes the new clinician before deactivate', body.some((u) => u.email === 'mgmt-new@example.com'));
@@ -224,6 +238,9 @@ async function main() {
     // Leave the shared local DB as this harness found it: remove the
     // rows it created (event_log rows naming them stay — the log is
     // append-only by design and details are just JSON).
+    await pool.query(
+      "DELETE FROM agencies WHERE license_number = 'E2E-MGMT'",
+    ).catch(() => {});
     await pool.query(
       `DELETE FROM users WHERE email IN
        ('tester@example.com', 'mgmt-new@example.com', 'mgmt-boss@example.com')`,

@@ -41,12 +41,25 @@ split when real patient data or paying customers arrive).
    sign-in still auto-creates a Firebase account; the API allowlist
    below is what actually gates data access. A full allowlist at the
    auth layer is the pre-pilot hardening step.)
+   **Platform update (Local 2026-11-03):** sign-up becomes
+   invite-only — an admin invites by email from Settings, the
+   invitee creates their own Firebase sign-in from the link, and
+   accepting the invite provisions their staff record. The
+   "full allowlist at the auth layer" hardening item is
+   superseded by the staff-record gate in point 2.
 2. **API access**: every API call carries the Firebase ID token.
    The API verifies it against the Firebase project
    (`FIREBASE_PROJECT_ID`, public-key verification — no service
    account key on the VM) AND checks the caller's email against
    `ALLOWED_EMAILS`. Either check failing → 401/403, and auth
    failures are written to `event_log`. The gate fails closed.
+   **Platform update (Local 2026-11-03):** the `ALLOWED_EMAILS`
+   check is removed. Token verification stays; every route
+   (except invite acceptance) then requires the token to resolve
+   to an ACTIVE `users` row — 403 `NO_STAFF_RECORD` otherwise.
+   The staff table + invites are the perimeter, and read access
+   inside it is scoped per user (links, episode teams, coverage
+   visits — see API.md, "Multi-user platform").
 3. **Manager override**: sensitive writes (patient edit/delete/
    restore, all staff writes) additionally require a manager PIN in
    the `X-Manager-Pin` header. The PIN belongs to an active
@@ -54,6 +67,10 @@ split when real patient data or paying customers arrive).
    and each use is attributed to that manager in an `admin_action`
    audit event. If the API is unreachable, the dashboard cannot
    verify a PIN, so the actions stay locked. See API.md.
+   **RETIRED 2026-11-02:** the PIN was replaced by role gates —
+   sensitive writes require the caller's OWN active manager/admin
+   staff role (API.md → "Role gates"). The paragraph above is
+   kept as history.
 
 ## Audit design
 

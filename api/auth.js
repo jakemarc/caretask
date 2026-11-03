@@ -3,7 +3,13 @@
 // Same pattern as the reference MarcDB API (jakemarc-fullstack/api/auth.js):
 // the dashboard signs in with Firebase Auth, gets the user's ID token, and
 // sends it as `Authorization: Bearer <token>`. This middleware verifies the
-// token and then checks the user against an allowlist.
+// token ONLY. Who may actually use the API is decided one layer up: the
+// caller must resolve to an active staff record (lib/platform.js
+// requireStaff), which is provisioned through the invite system. The
+// old ALLOWED_EMAILS allowlist was retired with the multi-user platform
+// (2026-11-03) — the invite is the perimeter now. /invites/accept is
+// the one route mounted behind requireAuth WITHOUT the staff gate,
+// because accepting an invite is how a staff record comes to exist.
 //
 // Verification needs NO private key on the VM, by design: checking a token's
 // signature uses Google's public keys, and this API never mints tokens or
@@ -14,11 +20,7 @@
 // Setup (on the VM, never in chat or in the repo):
 // 1. Set FIREBASE_PROJECT_ID to the dashboard's Firebase project ID.
 //    The server refuses to start without it (fail fast, not fail open).
-// 2. Set ALLOWED_EMAILS to the sign-in emails allowed to use the API,
-//    comma-separated. The allowlist FAILS CLOSED: if it is unset or empty,
-//    every request is rejected. That is deliberate — a signed-in account
-//    alone is not a real restriction.
-// 3. The VM must be able to reach Google over HTTPS to fetch the public
+// 2. The VM must be able to reach Google over HTTPS to fetch the public
 //    keys used to verify tokens.
 const admin = require('firebase-admin');
 
@@ -36,13 +38,6 @@ function getAdmin() {
   return app;
 }
 
-function allowedEmails() {
-  return (process.env.ALLOWED_EMAILS || '')
-    .split(',')
-    .map((email) => email.trim().toLowerCase())
-    .filter(Boolean);
-}
-
 async function requireAuth(req, res, next) {
   try {
     const header = req.headers.authorization || '';
@@ -53,11 +48,6 @@ async function requireAuth(req, res, next) {
     }
     const decoded = await getAdmin().auth().verifyIdToken(match[1]);
     const email = (decoded.email || '').toLowerCase();
-    const allowed = allowedEmails();
-    if (!allowed.includes(email)) {
-      req.authFailure = { reason: 'not_on_allowlist', email };
-      return res.status(403).json({ error: 'account is not on the API allowlist' });
-    }
     req.user = { uid: decoded.uid, email };
     next();
   } catch (err) {

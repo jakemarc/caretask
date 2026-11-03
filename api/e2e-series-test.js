@@ -83,6 +83,34 @@ async function setup() {
     `INSERT INTO patients (fname, lname) VALUES ('Series', 'Patient') RETURNING id`,
   );
   patientId = p1.rows[0].id;
+  // Platform fixture (2026-11-03): bookings now require an active
+  // episode whose team includes the provider. Give the patient an
+  // episode at a test agency; provider is primary, caller a member.
+  const ag = await pool.query(
+    `INSERT INTO agencies (license_number, name) VALUES ('E2E-SERIES', 'Series Test Agency')
+     ON CONFLICT (license_number) DO UPDATE SET name = EXCLUDED.name RETURNING id`,
+  );
+  const tester = await pool.query(
+    `SELECT id FROM users WHERE email = 'tester@example.com'`,
+  );
+  for (const uid of [providerId, tester.rows[0].id]) {
+    await pool.query(
+      `INSERT INTO user_agencies (user_id, agency_id) VALUES ($1, $2)
+       ON CONFLICT DO NOTHING`,
+      [uid, ag.rows[0].id],
+    );
+  }
+  const ep = await pool.query(
+    `INSERT INTO patient_episodes (patient_id, agency_id, primary_user_id, created_by)
+     VALUES ($1, $2, $3, $3) RETURNING id`,
+    [patientId, ag.rows[0].id, providerId],
+  );
+  await pool.query(
+    `INSERT INTO episode_members (episode_id, user_id, member_role, added_by)
+     VALUES ($1, $2, 'primary', $2), ($1, $3, 'member', $2)
+     ON CONFLICT DO NOTHING`,
+    [ep.rows[0].id, providerId, tester.rows[0].id],
+  );
 }
 
 async function main() {

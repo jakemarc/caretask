@@ -10,8 +10,9 @@ import type { Theme } from "../lib/theme";
 import { Moon, Sun } from "lucide-react";
 import Mark from "../components/Mark";
 
-// Sign-in only: there is no self-registration path in this app.
-// New users are created by an admin in the Firebase console, not from here.
+// Sign-in only: there is no public registration in this app.
+// New users join by invite — an admin sends one from Settings,
+// and the invite link lands on /accept-invite.
 export default function Login({
   theme,
   onToggleTheme,
@@ -149,6 +150,11 @@ export default function Login({
             Continue with Google
           </button>
         </form>
+        <p className="section-note">
+          Have an invite?{" "}
+          <a href="/accept-invite">Accept it here</a> — CareTask is
+          invite-only.
+        </p>
       </div>
     </div>
   );

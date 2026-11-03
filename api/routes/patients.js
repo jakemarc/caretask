@@ -39,11 +39,19 @@
 // - pharmacy_id must be an integer or null (no FK: no pharmacy table
 //   exists yet). Everything else writable must be a string or null.
 const express = require('express');
+const { createHash } = require('node:crypto');
 const pool = require('../db');
 const { insertEvent } = require('../lib/eventLog');
 const { requireRole, attachManager } = require('../lib/requireRole');
 const requireManagerRole = requireRole('manager', 'admin');
 const { computeDisplayName } = require('./agencies');
+const {
+  resolveStaff,
+  isPlatformAdmin,
+  hasChartAccess,
+  normName,
+  levenshtein,
+} = require('../lib/platform');
 
 const router = express.Router();
 
@@ -348,16 +356,42 @@ async function writeAudit(client, { patientId, actor, action, before, after }) {
   );
 }
 
-// GET /patients — list, newest first. Filters:
+// GET /patients — list, newest first. PLATFORM SCOPING (2026-11-03):
+// the default list is the CALLER'S OWN list — registry patients they
+// are linked to (patient_links) — and the `status` each row carries
+// is the caller's per-link list_status, not the registry column.
+// Platform admins may pass ?all=1 for the full registry view.
+// Filters:
 //   ?zone=green|yellow|red  (exact match)
-//   ?status=active|hold|discharged  (exact match)
+//   ?status=active|hold|discharged  (link status; registry status
+//                           under ?all=1)
 //   ?q=text                (partial match on fname, lname,
 //                           preferred_name, or email)
 //   ?limit=50 (max 200), ?offset=0
 router.get('/', async (req, res, next) => {
   try {
-    const conditions = [ACTIVE];
+    const staff = await resolveStaff(req);
+    if (!staff) {
+      return res.status(403).json({
+        error: 'no active staff record for this account',
+        code: 'NO_STAFF_RECORD',
+      });
+    }
+    const all = req.query.all === '1';
+    if (all && !isPlatformAdmin(staff)) {
+      return res.status(403).json({
+        error: 'the registry view is for platform admins',
+        code: 'ADMIN_REQUIRED',
+      });
+    }
+    const conditions = ['p.deleted_at IS NULL'];
     const params = [];
+    let from = `patients p ${AGENCY_JOIN}`;
+    if (!all) {
+      params.push(staff.id);
+      from += ` JOIN patient_links l ON l.patient_id = p.id
+                AND l.user_id = $${params.length} AND l.removed_at IS NULL`;
+    }
     if (req.query.zone !== undefined) {
       if (!ZONES.includes(req.query.zone)) {
         return res
@@ -365,7 +399,7 @@ router.get('/', async (req, res, next) => {
           .json({ error: `zone must be one of: ${ZONES.join(', ')}` });
       }
       params.push(req.query.zone);
-      conditions.push(`zone = $${params.length}`);
+      conditions.push(`p.zone = $${params.length}`);
     }
     if (req.query.status !== undefined) {
       if (!STATUSES.includes(req.query.status)) {
@@ -374,13 +408,15 @@ router.get('/', async (req, res, next) => {
           .json({ error: `status must be one of: ${STATUSES.join(', ')}` });
       }
       params.push(req.query.status);
-      conditions.push(`status = $${params.length}`);
+      conditions.push(
+        `${all ? 'p.status' : 'l.list_status'} = $${params.length}`,
+      );
     }
     if (req.query.q) {
       params.push(`%${req.query.q}%`);
       const p = params.length;
       conditions.push(
-        `(fname ILIKE $${p} OR lname ILIKE $${p} OR preferred_name ILIKE $${p} OR email ILIKE $${p})`,
+        `(p.fname ILIKE $${p} OR p.lname ILIKE $${p} OR p.preferred_name ILIKE $${p} OR p.email ILIKE $${p})`,
       );
     }
     const limit = Math.min(
@@ -389,10 +425,17 @@ router.get('/', async (req, res, next) => {
     );
     const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
     const result = await pool.query(
-      `SELECT p.*, ${AGENCY_COLS} FROM patients p ${AGENCY_JOIN} WHERE ${conditions.join(' AND ')} ORDER BY p.created_at DESC LIMIT ${limit} OFFSET ${offset}`,
+      `SELECT p.*, ${all ? 'NULL' : 'l.list_status'} AS _link_status, ${AGENCY_COLS} FROM ${from} WHERE ${conditions.join(' AND ')} ORDER BY p.created_at DESC LIMIT ${limit} OFFSET ${offset}`,
       params,
     );
-    res.json(result.rows.map(shapePatientRow));
+    res.json(
+      result.rows.map((row) => {
+        const shaped = shapePatientRow(row);
+        if (shaped._link_status) shaped.status = shaped._link_status;
+        delete shaped._link_status;
+        return shaped;
+      }),
+    );
   } catch (err) {
     next(err);
   }
@@ -410,6 +453,13 @@ router.get('/:id', async (req, res, next) => {
       [req.params.id],
     );
     if (!result.rows[0]) {
+      return res.status(404).json({ error: 'patient not found' });
+    }
+    // Chart access (platform spec §3): linked, episode team, or
+    // platform admin — otherwise the same 404 as a missing patient,
+    // so the registry cannot be enumerated by guessing ids.
+    const staff = await resolveStaff(req);
+    if (!(await hasChartAccess(staff, result.rows[0].id))) {
       return res.status(404).json({ error: 'patient not found' });
     }
     insertEvent(pool, {
@@ -439,6 +489,10 @@ router.get('/:id/audit', async (req, res, next) => {
     if (!patient.rows[0]) {
       return res.status(404).json({ error: 'patient not found' });
     }
+    const auditStaff = await resolveStaff(req);
+    if (!(await hasChartAccess(auditStaff, req.params.id))) {
+      return res.status(404).json({ error: 'patient not found' });
+    }
     const result = await pool.query(
       `SELECT id, patient_id, actor_uid, actor_email, action, changed, created_at
        FROM audit_log WHERE patient_id = $1 ORDER BY created_at DESC`,
@@ -449,10 +503,107 @@ router.get('/:id/audit', async (req, res, next) => {
     next(err);
   }
 });
+// ------------------------------------------------------------------
+// Platform duplicate rules (spec §4). The registry holds ONE record
+// per real person. Exact identity (same normalized name + same DOB;
+// or, when a DOB is missing on either side, same name + same phone
+// or email) is a HARD BLOCK — stricter than OpenEMR's
+// warn-and-confirm, Jake's call. Near matches (same DOB + similar
+// name, same phone/email under a different name, or the same name
+// with a different/missing DOB) get a POSSIBLE_MATCH prompt the
+// caller can override with confirm_create: true.
+function dobStr(v) {
+  if (v === null || v === undefined || v === '') return null;
+  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  return String(v).slice(0, 10);
+}
+
+function phoneKey(v) {
+  const d = String(v || '').replace(/\D/g, '');
+  return d.length >= 7 ? d.slice(-10) : '';
+}
+
+function intakeFingerprint(fields) {
+  const raw = `${normName(fields.fname)}|${normName(fields.lname)}|${dobStr(fields.date_of_birth) || ''}`;
+  return createHash('sha1').update(raw).digest('hex');
+}
+
+async function findDuplicates(fields) {
+  const fn = normName(fields.fname);
+  const ln = normName(fields.lname);
+  const dob = dobStr(fields.date_of_birth);
+  const fingerprint = intakeFingerprint(fields);
+  const phones = [phoneKey(fields.phone_cell), phoneKey(fields.phone_home)].filter(Boolean);
+  const email = (fields.email || '').trim().toLowerCase();
+  const { rows } = await pool.query(
+    `SELECT id, fname, lname, date_of_birth, city, phone_home, phone_cell, email
+       FROM patients
+      WHERE deleted_at IS NULL AND (
+        lower(btrim(lname)) = $1
+        OR ($2::date IS NOT NULL AND date_of_birth = $2)
+        OR ($3 <> '' AND lower(email) = $3)
+        OR ($4 <> '' AND phone_cell = $4)
+        OR ($5 <> '' AND phone_home = $5)
+      ) LIMIT 50`,
+    [ln, dob, email, fields.phone_cell || '', fields.phone_home || ''],
+  );
+  let exact = null;
+  const near = [];
+  for (const row of rows) {
+    const rFn = normName(row.fname);
+    const rLn = normName(row.lname);
+    const namesEqual = rFn === fn && rLn === ln;
+    const rDob = dobStr(row.date_of_birth);
+    const dobEqual = !!(dob && rDob && dob === rDob);
+    const phoneMatch =
+      phones.length > 0 &&
+      [phoneKey(row.phone_cell), phoneKey(row.phone_home)].some(
+        (k) => k && phones.includes(k),
+      );
+    const emailMatch =
+      !!email && (row.email || '').trim().toLowerCase() === email;
+    let kind = null;
+    if (namesEqual && dobEqual) kind = 'exact';
+    else if (namesEqual && (!dob || !rDob) && (phoneMatch || emailMatch)) kind = 'exact';
+    else if (dobEqual && levenshtein(rLn, ln) <= 2 && levenshtein(rFn, fn) <= 2) kind = 'near';
+    else if (phoneMatch || emailMatch) kind = 'near';
+    else if (namesEqual) kind = 'near';
+    if (kind === 'exact' && !exact) {
+      exact = { id: row.id, name: `${row.fname} ${row.lname}`, dob: rDob, city: row.city || null };
+    } else if (kind === 'near' && near.length < 3) {
+      near.push({ id: row.id, name: `${row.fname} ${row.lname}`, dob: rDob, city: row.city || null });
+    }
+  }
+  // Known Non-Duplicates (Epic's KND, adapted): pairs a reviewer
+  // already cleared for this exact intake fingerprint never prompt
+  // again. Exact matches are NEVER suppressed — only near prompts.
+  if (near.length) {
+    const dismissed = await pool.query(
+      `SELECT patient_id FROM patient_duplicate_dismissals
+        WHERE fingerprint = $1 AND patient_id = ANY($2::uuid[])`,
+      [fingerprint, near.map((c) => c.id)],
+    );
+    const dismissedIds = new Set(dismissed.rows.map((r) => r.patient_id));
+    for (let i = near.length - 1; i >= 0; i--) {
+      if (dismissedIds.has(near[i].id)) near.splice(i, 1);
+    }
+  }
+  return { exact, near, fingerprint };
+}
+
 // POST /patients — create. fname + lname are required. Audit: create
-// entry, before null, after the inserted row.
+// entry, before null, after the inserted row. Platform: the create
+// runs the duplicate rules first, and a successful create auto-links
+// the patient to the creator's list (patient_links).
 router.post('/', async (req, res, next) => {
   try {
+    const staff = await resolveStaff(req);
+    if (!staff) {
+      return res.status(403).json({
+        error: 'no active staff record for this account',
+        code: 'NO_STAFF_RECORD',
+      });
+    }
     const fields = pickWritable(req.body);
     if (!fields.fname || !fields.fname.trim()) {
       return res.status(400).json({ error: 'fname is required' });
@@ -477,6 +628,27 @@ router.post('/', async (req, res, next) => {
         code: 'AGENCY_NOT_FOUND',
       });
     }
+    const dup = await findDuplicates(fields);
+    if (dup.exact) {
+      const linked = await pool.query(
+        `SELECT 1 FROM patient_links
+          WHERE user_id = $1 AND patient_id = $2 AND removed_at IS NULL`,
+        [staff.id, dup.exact.id],
+      );
+      return res.status(409).json({
+        error: 'this patient is already in the database',
+        code: 'PATIENT_EXISTS',
+        patient: { ...dup.exact, already_linked: linked.rows.length > 0 },
+      });
+    }
+    if (dup.near.length && req.body.confirm_create !== true) {
+      return res.status(409).json({
+        error: 'possible duplicate — review before creating',
+        code: 'POSSIBLE_MATCH',
+        candidates: dup.near,
+      });
+    }
+    const linkStatus = STATUSES.includes(fields.status) ? fields.status : 'active';
     const keys = Object.keys(fields);
     const columns = keys.join(', ');
     const placeholders = keys.map((_, i) => `$${i + 1}`).join(', ');
@@ -493,9 +665,42 @@ router.post('/', async (req, res, next) => {
         before: null,
         after: row,
       });
+      await client.query(
+        `INSERT INTO patient_links (user_id, patient_id, list_status)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (user_id, patient_id) DO UPDATE
+           SET removed_at = NULL, list_status = EXCLUDED.list_status,
+               updated_at = now()`,
+        [staff.id, row.id, linkStatus],
+      );
       return row;
     });
-    res.status(201).json(await decoratePatient(created));
+    if (req.body.confirm_create === true && dup.near.length) {
+      insertEvent(pool, {
+        actor: req.user,
+        event: 'admin_action',
+        patientId: created.id,
+        details: {
+          action: 'patient_create_duplicate_confirmed',
+          candidate_ids: dup.near.map((c) => c.id),
+        },
+        ip: req.ip || null,
+      }).catch(() => {});
+      // Remember the clearance (Known Non-Duplicate): this intake
+      // fingerprint vs. each reviewed candidate never prompts again.
+      for (const c of dup.near) {
+        pool
+          .query(
+            `INSERT INTO patient_duplicate_dismissals (patient_id, fingerprint, dismissed_by)
+             VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+            [c.id, dup.fingerprint, staff.id],
+          )
+          .catch(() => {});
+      }
+    }
+    const shaped = await decoratePatient(created);
+    shaped.status = linkStatus;
+    res.status(201).json(shaped);
   } catch (err) {
     next(err);
   }
@@ -503,8 +708,21 @@ router.post('/', async (req, res, next) => {
 
 // PUT /patients/:id — update only the whitelisted fields provided.
 // Audit: update entry, before the pre-update row, after the new row.
+// Platform: the caller needs chart access (404 otherwise, when the
+// patient exists). A `status` in the body also syncs the caller's
+// per-link list status — list status is per-user now (spec §2).
 router.put('/:id', attachManager, async (req, res, next) => {
   try {
+    const staff = await resolveStaff(req);
+    if (!(await hasChartAccess(staff, req.params.id))) {
+      const exists = await pool.query(
+        `SELECT 1 FROM patients WHERE id = $1 AND ${ACTIVE}`,
+        [req.params.id],
+      );
+      if (exists.rows.length) {
+        return res.status(404).json({ error: 'patient not found' });
+      }
+    }
     const fields = pickWritable(req.body);
     const error = validatePatient(fields);
     if (error) return res.status(400).json({ error });
@@ -551,6 +769,13 @@ router.put('/:id', attachManager, async (req, res, next) => {
         },
         ip: req.ip,
       });
+      if (fields.status !== undefined && staff) {
+        await client.query(
+          `UPDATE patient_links SET list_status = $3, updated_at = now()
+            WHERE user_id = $1 AND patient_id = $2 AND removed_at IS NULL`,
+          [staff.id, row.id, fields.status],
+        );
+      }
       return row;
     });
     if (!updated) {
@@ -654,6 +879,123 @@ router.post('/:id/restore', requireManagerRole, async (req, res, next) => {
       return res.status(409).json({ error: 'patient is not deleted' });
     }
     res.json(restored.row);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ------------------------------------------------------------------
+// List links (platform spec §4): "my list" membership is the
+// caller's own act — add, remove, and per-link status. The registry
+// patient is never touched by these routes.
+// ------------------------------------------------------------------
+
+// POST /patients/:id/link — add to my list (idempotent; revives a
+// removed link, resetting its status to active).
+router.post('/:id/link', async (req, res, next) => {
+  try {
+    const staff = await resolveStaff(req);
+    if (!staff) {
+      return res.status(403).json({
+        error: 'no active staff record for this account',
+        code: 'NO_STAFF_RECORD',
+      });
+    }
+    const patient = await pool.query(
+      `SELECT id FROM patients WHERE id = $1 AND ${ACTIVE}`,
+      [req.params.id],
+    );
+    if (!patient.rows[0]) {
+      return res.status(404).json({ error: 'patient not found' });
+    }
+    const r = await pool.query(
+      `INSERT INTO patient_links (user_id, patient_id, list_status)
+       VALUES ($1, $2, 'active')
+       ON CONFLICT (user_id, patient_id) DO UPDATE
+         SET list_status = CASE WHEN patient_links.removed_at IS NOT NULL
+                                THEN 'active' ELSE patient_links.list_status END,
+             removed_at = NULL, updated_at = now()
+       RETURNING list_status`,
+      [staff.id, req.params.id],
+    );
+    insertEvent(pool, {
+      actor: req.user,
+      event: 'patient_link',
+      patientId: req.params.id,
+      details: {},
+      ip: req.ip || null,
+    }).catch(() => {});
+    res.json({ linked: true, patient_id: req.params.id, list_status: r.rows[0].list_status });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /patients/:id/link — remove from my list. History (my
+// appointments, documents) stays; the patient just leaves my list.
+router.delete('/:id/link', async (req, res, next) => {
+  try {
+    const staff = await resolveStaff(req);
+    if (!staff) {
+      return res.status(403).json({
+        error: 'no active staff record for this account',
+        code: 'NO_STAFF_RECORD',
+      });
+    }
+    const r = await pool.query(
+      `UPDATE patient_links SET removed_at = now(), updated_at = now()
+        WHERE user_id = $1 AND patient_id = $2 AND removed_at IS NULL
+        RETURNING 1`,
+      [staff.id, req.params.id],
+    );
+    if (!r.rows.length) {
+      return res.status(404).json({
+        error: 'patient is not on your list',
+        code: 'NOT_LINKED',
+      });
+    }
+    insertEvent(pool, {
+      actor: req.user,
+      event: 'patient_unlink',
+      patientId: req.params.id,
+      details: {},
+      ip: req.ip || null,
+    }).catch(() => {});
+    res.json({ linked: false, patient_id: req.params.id });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PUT /patients/:id/link — set my per-link list status.
+router.put('/:id/link', async (req, res, next) => {
+  try {
+    const staff = await resolveStaff(req);
+    if (!staff) {
+      return res.status(403).json({
+        error: 'no active staff record for this account',
+        code: 'NO_STAFF_RECORD',
+      });
+    }
+    const status = req.body?.list_status;
+    if (!STATUSES.includes(status)) {
+      return res.status(400).json({
+        error: `list_status must be one of: ${STATUSES.join(', ')}`,
+      });
+    }
+    const r = await pool.query(
+      `UPDATE patient_links SET list_status = $3, updated_at = now()
+        WHERE user_id = $1 AND patient_id = $2 AND removed_at IS NULL
+        RETURNING list_status`,
+      [staff.id, req.params.id, status],
+    );
+    if (!r.rows.length) {
+      return res.status(404).json({
+        error: 'patient is not on your list',
+        code: 'NOT_LINKED',
+      });
+    }
+    res.json({ linked: true, patient_id: req.params.id, list_status: r.rows[0].list_status });
   } catch (err) {
     next(err);
   }

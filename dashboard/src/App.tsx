@@ -11,6 +11,7 @@ import {
   type Theme,
 } from "./lib/theme";
 import Login from "./pages/Login";
+import AcceptInvite from "./pages/AcceptInvite";
 import Dashboard from "./pages/Dashboard";
 import NotFound from "./pages/NotFound";
 
@@ -70,6 +71,10 @@ export default function App() {
       <Route
         path="/login"
         element={<Login theme={theme} onToggleTheme={toggleTheme} />}
+      />
+      <Route
+        path="/accept-invite"
+        element={<AcceptInvite theme={theme} onToggleTheme={toggleTheme} />}
       />
       <Route
         path="/app"

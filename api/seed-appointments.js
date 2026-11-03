@@ -9,6 +9,9 @@
 // It REPLACES all existing appointments (TRUNCATE) — demo data only,
 // run manually, never automatically:
 //   node seed-appointments.js
+// The TRUNCATE runs with CASCADE because documents.appointment_id
+// references appointments — documents pointing at appointments are
+// cleared along with them. Still demo-only, still manual.
 const pool = require('./db');
 
 const PLAN = [
@@ -52,7 +55,7 @@ async function main() {
   );
   const providerId = prov.rows[0]?.id ?? null;
 
-  await pool.query('TRUNCATE appointments RESTART IDENTITY');
+  await pool.query('TRUNCATE appointments RESTART IDENTITY CASCADE');
   let made = 0;
   for (const [days, h, m, lname, catName, status, withProvider] of PLAN) {
     const cat = byCat.get(catName);

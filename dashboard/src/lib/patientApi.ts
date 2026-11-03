@@ -123,6 +123,11 @@ export interface NewApiPatient {
   pharmacy_id?: number | null;
   agency_id?: number | null;
   agency_name_text?: string | null;
+  // Platform dedupe (2026-11-03): set only when the user reviewed
+  // a POSSIBLE_MATCH prompt and chose "Create anyway". Recorded
+  // server-side as a known non-duplicate so the same intake data
+  // never prompts again.
+  confirm_create?: boolean;
 }
 
 // The API base URL, e.g. https://api.marcinnotech.net for the live API
@@ -303,10 +308,14 @@ async function apiFetch(
     // Surface the API's error code (e.g. ROLE_REQUIRED on
     // manager-gated writes) alongside the status, so callers can react
     // specifically instead of treating every failure as a dead API.
+    // The parsed body rides along too: the platform's 409s carry the
+    // payload the UI needs (PATIENT_EXISTS → the existing patient,
+    // POSSIBLE_MATCH → the candidates).
     let code: string | undefined;
+    let body: unknown;
     try {
-      const body = (await res.json()) as { code?: string } | null;
-      code = body?.code;
+      body = (await res.json()) as { code?: string } | null;
+      code = (body as { code?: string } | null)?.code;
     } catch {
       // Non-JSON error body — status alone will have to do.
     }
@@ -315,6 +324,7 @@ async function apiFetch(
     ) as ApiRequestError;
     err.status = res.status;
     err.code = code;
+    err.body = body;
     throw err;
   }
   // 204 (e.g. soft delete) carries no body — do not parse one.
@@ -327,6 +337,9 @@ async function apiFetch(
 export interface ApiRequestError extends Error {
   status?: number;
   code?: string;
+  // The API's parsed error body, when it sent JSON (the platform
+  // 409s carry their payload here — see apiFetch).
+  body?: unknown;
 }
 
 // True when the API rejected a manager-gated write because the
@@ -1016,6 +1029,9 @@ export interface ApiAppointment {
   notes: string | null;
   // Repeating-visits series link (2026-11-02); null for one-offs.
   series_id: string | null;
+  // The episode this visit belongs to (platform, 2026-11-03);
+  // null for provider-block rows and pre-platform appointments.
+  episode_id: string | null;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
@@ -1111,8 +1127,15 @@ export async function listAppointments(
   user: User,
   fromISO: string,
   toISO: string,
+  opts: { patientId?: string; scope?: "all" } = {},
 ): Promise<ApiAppointment[]> {
   const q = new URLSearchParams({ from: fromISO, to: toISO });
+  // Platform scopes (2026-11-03): the default is the caller's
+  // personal calendar. patientId asks for the patient's master
+  // schedule (every team member's visits — chart access required);
+  // scope "all" is the manager/admin practice-wide view.
+  if (opts.patientId) q.set("patient_id", opts.patientId);
+  if (opts.scope) q.set("scope", opts.scope);
   const out = (await apiFetch(user, `/appointments?${q}`)) as {
     appointments: ApiAppointment[];
   };
@@ -1536,4 +1559,436 @@ export async function restoreDocument(
     { method: "POST" },
   )) as { document: ApiDocument };
   return out.document;
+}
+
+// ------------------------------------------------------------------
+// Multi-user platform (2026-11-03): master patient registry with
+// per-user lists (patient_links), episodes as the unit of sharing,
+// episode teams, agency memberships, and invite-only sign-up.
+// Spec: ~/workspace/marc-innotech/multi-user-platform-spec.md.
+// The API's staff-record gate replaced the email allowlist: a
+// signed-in user with no staff record gets 403 NO_STAFF_RECORD
+// from every route except POST /invites/accept.
+
+// ---- Colleagues -------------------------------------------------
+// The provider directory for THIS caller: themselves plus the
+// staff who share at least one agency membership (platform admins
+// see everyone). This is what booking dropdowns and episode-team
+// pickers use — NOT the full staff list.
+export async function listClinicians(user: User): Promise<ApiUser[]> {
+  return (await apiFetch(user, "/users/clinicians")) as ApiUser[];
+}
+
+// ---- Patient links (my list) ------------------------------------
+
+// Add a registry patient to the caller's list (idempotent; revives
+// a removed link as active). This is the "Add to my list" act
+// behind the duplicate block.
+export async function linkPatient(
+  user: User,
+  patientId: string,
+): Promise<{ linked: boolean; list_status: PatientStatus }> {
+  return (await apiFetch(
+    user,
+    `/patients/${encodeURIComponent(patientId)}/link`,
+    { method: "POST" },
+  )) as { linked: boolean; list_status: PatientStatus };
+}
+
+// Remove a patient from the caller's list. The registry record and
+// its history stay; the caller loses chart access unless an
+// episode team or a coverage visit still connects them.
+export async function unlinkPatient(
+  user: User,
+  patientId: string,
+): Promise<void> {
+  await apiFetch(user, `/patients/${encodeURIComponent(patientId)}/link`, {
+    method: "DELETE",
+  });
+}
+
+// Set the caller's own list status for a patient (active / hold /
+// discharged). Per-user by design: my "discharged" never touches
+// a colleague's list.
+export async function setLinkStatus(
+  user: User,
+  patientId: string,
+  listStatus: PatientStatus,
+): Promise<{ linked: boolean; list_status: PatientStatus }> {
+  return (await apiFetch(
+    user,
+    `/patients/${encodeURIComponent(patientId)}/link`,
+    { method: "PUT", body: JSON.stringify({ list_status: listStatus }) },
+  )) as { linked: boolean; list_status: PatientStatus };
+}
+
+// ---- Episodes ----------------------------------------------------
+
+export interface ApiEpisodeMember {
+  user_id: string;
+  user_name: string;
+  user_role: string;
+  user_position: string | null;
+  member_role: "primary" | "member";
+  supervised_by: string | null;
+  supervised_by_name: string | null;
+  added_at: string;
+  removed_at: string | null;
+}
+
+export interface ApiEpisodeHold {
+  reason: string;
+  note: string | null;
+  started_on: string;
+}
+
+export interface ApiEpisode {
+  id: string;
+  patient_id: string;
+  agency_id: number;
+  agency_name: string;
+  primary_user_id: string;
+  primary_name: string;
+  // The clinical coordinator of the case (addendum 2026-11-03);
+  // defaults to the primary, transferable to any team member.
+  case_manager_user_id: string | null;
+  case_manager_name: string | null;
+  status: "active" | "on_hold" | "discharged";
+  admitted_at: string;
+  discharged_at: string | null;
+  discharge_reason: string | null;
+  discharge_note: string | null;
+  recert_of: string | null;
+  created_by: string;
+  created_at: string;
+  members: ApiEpisodeMember[];
+  // Present on on_hold episodes: the current open hold.
+  current_hold?: ApiEpisodeHold | null;
+}
+
+// Hold + discharge reason vocabularies (mirror the API CHECKs),
+// with the labels the UI shows.
+export const HOLD_REASONS: { value: string; label: string }[] = [
+  { value: "hospitalized", label: "Hospitalized" },
+  { value: "patient_request", label: "Patient request" },
+  { value: "physician_order", label: "Physician order" },
+  { value: "other", label: "Other" },
+];
+
+export const DISCHARGE_REASONS: { value: string; label: string }[] = [
+  { value: "completed", label: "Goals met — care complete" },
+  { value: "patient_declined", label: "Patient / family declined" },
+  { value: "transferred_agency", label: "Transferred to another agency" },
+  { value: "transferred_inpatient", label: "Transferred to inpatient facility" },
+  { value: "moved_out_of_area", label: "Moved out of the service area" },
+  { value: "physician_order", label: "Physician ordered stop" },
+  { value: "deceased", label: "Deceased" },
+  { value: "other", label: "Other" },
+];
+
+export function holdReasonLabel(value: string | null | undefined): string {
+  return HOLD_REASONS.find((r) => r.value === value)?.label ?? "On hold";
+}
+
+export function dischargeReasonLabel(
+  value: string | null | undefined,
+): string | null {
+  if (!value) return null;
+  return DISCHARGE_REASONS.find((r) => r.value === value)?.label ?? value;
+}
+
+// All episodes for a patient, newest first, each with its team.
+// Chart access required (the API answers 404 otherwise).
+export async function fetchEpisodes(
+  user: User,
+  patientId: string,
+): Promise<ApiEpisode[]> {
+  const out = (await apiFetch(
+    user,
+    `/patients/${encodeURIComponent(patientId)}/episodes`,
+  )) as { episodes: ApiEpisode[] };
+  return out.episodes;
+}
+
+// Open an episode at one of the caller's agencies. The caller
+// becomes the primary. 409 EPISODE_ACTIVE when any agency already
+// holds an active episode for this patient — the error body names
+// the holding agency and primary.
+export async function createEpisode(
+  user: User,
+  patientId: string,
+  agencyId: number,
+  admittedAt?: string,
+): Promise<ApiEpisode> {
+  const out = (await apiFetch(
+    user,
+    `/patients/${encodeURIComponent(patientId)}/episodes`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        agency_id: agencyId,
+        ...(admittedAt ? { admitted_at: admittedAt } : {}),
+      }),
+    },
+  )) as { episode: ApiEpisode };
+  return out.episode;
+}
+
+export async function dischargeEpisode(
+  user: User,
+  episodeId: string,
+  opts: { dischargedAt?: string; note?: string; reason?: string } = {},
+): Promise<ApiEpisode> {
+  const out = (await apiFetch(
+    user,
+    `/episodes/${encodeURIComponent(episodeId)}/discharge`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        ...(opts.dischargedAt ? { discharged_at: opts.dischargedAt } : {}),
+        ...(opts.reason ? { discharge_reason: opts.reason } : {}),
+        ...(opts.note ? { discharge_note: opts.note } : {}),
+      }),
+    },
+  )) as { episode: ApiEpisode };
+  return out.episode;
+}
+
+// Put an episode on hold (addendum 2026-11-03): the episode stays
+// live — it still owns the patient — but booking closes until the
+// hold ends. Reason defaults to "other" server-side.
+export async function holdEpisode(
+  user: User,
+  episodeId: string,
+  opts: { reason?: string; note?: string; startedOn?: string } = {},
+): Promise<ApiEpisode> {
+  const out = (await apiFetch(
+    user,
+    `/episodes/${encodeURIComponent(episodeId)}/hold`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        ...(opts.reason ? { reason: opts.reason } : {}),
+        ...(opts.note ? { note: opts.note } : {}),
+        ...(opts.startedOn ? { started_on: opts.startedOn } : {}),
+      }),
+    },
+  )) as { episode: ApiEpisode };
+  return out.episode;
+}
+
+// End the current hold; the episode goes back to active.
+export async function resumeEpisode(
+  user: User,
+  episodeId: string,
+  resumedOn?: string,
+): Promise<ApiEpisode> {
+  const out = (await apiFetch(
+    user,
+    `/episodes/${encodeURIComponent(episodeId)}/resume`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        ...(resumedOn ? { resumed_on: resumedOn } : {}),
+      }),
+    },
+  )) as { episode: ApiEpisode };
+  return out.episode;
+}
+
+// Same-agency recertification: closes this episode and opens its
+// successor with the same team, in one act.
+export async function recertifyEpisode(
+  user: User,
+  episodeId: string,
+  admittedAt?: string,
+): Promise<ApiEpisode> {
+  const out = (await apiFetch(
+    user,
+    `/episodes/${encodeURIComponent(episodeId)}/recertify`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        ...(admittedAt ? { admitted_at: admittedAt } : {}),
+      }),
+    },
+  )) as { episode: ApiEpisode };
+  return out.episode;
+}
+
+// Add a colleague to the episode team (they must belong to the
+// episode's agency; the patient is auto-linked to their list).
+// Returns the episode's full member list.
+export async function addEpisodeMember(
+  user: User,
+  episodeId: string,
+  input: { userId: string; supervisedBy?: string | null },
+): Promise<ApiEpisodeMember[]> {
+  const out = (await apiFetch(
+    user,
+    `/episodes/${encodeURIComponent(episodeId)}/members`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        user_id: input.userId,
+        ...(input.supervisedBy
+          ? { supervised_by: input.supervisedBy }
+          : {}),
+      }),
+    },
+  )) as { members: ApiEpisodeMember[] };
+  return out.members;
+}
+
+export async function removeEpisodeMember(
+  user: User,
+  episodeId: string,
+  memberUserId: string,
+): Promise<ApiEpisodeMember[]> {
+  const out = (await apiFetch(
+    user,
+    `/episodes/${encodeURIComponent(episodeId)}/members/${encodeURIComponent(memberUserId)}`,
+    { method: "DELETE" },
+  )) as { members: ApiEpisodeMember[] };
+  return out.members;
+}
+
+// Hand the primary role to another current team member.
+export async function transferEpisodePrimary(
+  user: User,
+  episodeId: string,
+  newPrimaryUserId: string,
+): Promise<ApiEpisode> {
+  const out = (await apiFetch(
+    user,
+    `/episodes/${encodeURIComponent(episodeId)}/primary`,
+    {
+      method: "PUT",
+      body: JSON.stringify({ user_id: newPrimaryUserId }),
+    },
+  )) as { episode: ApiEpisode };
+  return out.episode;
+}
+
+// Hand case management to another current team member
+// (addendum 2026-11-03). The case manager runs the case
+// clinically and holds full episode management rights.
+export async function transferCaseManager(
+  user: User,
+  episodeId: string,
+  newCaseManagerUserId: string,
+): Promise<ApiEpisode> {
+  const out = (await apiFetch(
+    user,
+    `/episodes/${encodeURIComponent(episodeId)}/case-manager`,
+    {
+      method: "PUT",
+      body: JSON.stringify({ user_id: newCaseManagerUserId }),
+    },
+  )) as { episode: ApiEpisode };
+  return out.episode;
+}
+
+// ---- My agencies --------------------------------------------------
+// The agencies the caller belongs to. Membership is what lets a
+// clinician open episodes, join teams, and take coverage visits
+// at an agency.
+
+// The /users/me/agencies route returns a light row (id, legal
+// name, display name, city, state) — not the full directory row.
+export interface ApiMyAgency {
+  id: number;
+  name: string;
+  display_name: string;
+  city: string | null;
+  state: string | null;
+}
+
+export async function fetchMyAgencies(user: User): Promise<ApiMyAgency[]> {
+  const out = (await apiFetch(user, "/users/me/agencies")) as {
+    agencies: ApiMyAgency[];
+  };
+  return out.agencies.map((a) => ({ ...a, id: Number(a.id) }));
+}
+
+export async function addMyAgency(
+  user: User,
+  agencyId: number,
+): Promise<void> {
+  await apiFetch(user, "/users/me/agencies", {
+    method: "POST",
+    body: JSON.stringify({ agency_id: agencyId }),
+  });
+}
+
+// 409 PRIMARY_ON_ACTIVE_EPISODE when the caller is the primary on
+// an active episode at that agency — discharge or transfer first.
+export async function removeMyAgency(
+  user: User,
+  agencyId: number,
+): Promise<void> {
+  await apiFetch(user, `/users/me/agencies/${agencyId}`, {
+    method: "DELETE",
+  });
+}
+
+// ---- Invites ------------------------------------------------------
+
+export interface ApiInvite {
+  id: string;
+  email: string;
+  role: string;
+  status: "pending" | "accepted" | "revoked" | "expired";
+  invited_by: string;
+  expires_at: string;
+  accepted_by: string | null;
+  accepted_at: string | null;
+  created_at: string;
+}
+
+// Create an invite (platform admin only). The raw code comes back
+// exactly once — build the acceptance link from it immediately.
+export async function createInvite(
+  user: User,
+  input: { email: string; role: string },
+): Promise<{ invite: ApiInvite; code: string; accept_path: string }> {
+  return (await apiFetch(user, "/invites", {
+    method: "POST",
+    body: JSON.stringify(input),
+  })) as { invite: ApiInvite; code: string; accept_path: string };
+}
+
+export async function listInvites(user: User): Promise<ApiInvite[]> {
+  const out = (await apiFetch(user, "/invites")) as {
+    invites: ApiInvite[];
+  };
+  return out.invites;
+}
+
+export async function revokeInvite(
+  user: User,
+  inviteId: string,
+): Promise<ApiInvite> {
+  const out = (await apiFetch(
+    user,
+    `/invites/${encodeURIComponent(inviteId)}`,
+    { method: "DELETE" },
+  )) as { invite: ApiInvite };
+  return out.invite;
+}
+
+// Accept an invite with a freshly signed-in account: creates (or
+// claims) the caller's staff record with the invite's role. This
+// is the one platform route open to a user with no staff record.
+// Error codes: INVITE_INVALID / INVITE_USED / INVITE_EXPIRED /
+// INVITE_EMAIL_MISMATCH.
+export async function acceptInvite(
+  user: User,
+  input: { code: string; fname?: string; lname?: string },
+): Promise<ApiUser> {
+  const out = (await apiFetch(user, "/invites/accept", {
+    method: "POST",
+    body: JSON.stringify(input),
+  })) as { staff: ApiUser };
+  return out.staff;
 }

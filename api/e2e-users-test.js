@@ -104,6 +104,25 @@ async function main() {
     res = await fetch(`${BASE}/users/me`);
     const me = await res.json();
     check('GET /users/me is null for a user with no row', me === null);
+    // Platform fixture (2026-11-03): /users/clinicians is scoped to
+    // the caller's agency colleagues. Give the caller a staff row
+    // and a shared agency with the authorized clinicians.
+    await pool.query(
+      `INSERT INTO users (email, role, authorized, active, fname, lname)
+       VALUES ('tester@example.com', 'manager', true, true, 'Test', 'Caller')
+       ON CONFLICT (email) DO UPDATE SET active = true`,
+    );
+    const agU = await pool.query(
+      `INSERT INTO agencies (license_number, name) VALUES ('E2E-USERS', 'Users Test Agency')
+       ON CONFLICT (license_number) DO UPDATE SET name = EXCLUDED.name RETURNING id`,
+    );
+    for (const em of ['tester@example.com', 'clin@example.com', 'adm@example.com']) {
+      await pool.query(
+        `INSERT INTO user_agencies (user_id, agency_id)
+         SELECT id, $1 FROM users WHERE email = $2 ON CONFLICT DO NOTHING`,
+        [agU.rows[0].id, em],
+      );
+    }
     res = await fetch(`${BASE}/users/clinicians`);
     const clinicians = await res.json();
     check(
@@ -177,6 +196,16 @@ async function main() {
       body: JSON.stringify({ pin: MANAGER_PIN }),
     });
     check('verify-pin is gone (404)', res.status === 404, `got ${res.status}`);
+
+    // Platform fixture teardown: section 7's premise is a caller
+    // with NO staff row, and the battery's agencies suite must not
+    // inherit this suite's test agency. Remove both.
+    await pool.query(
+      `DELETE FROM user_agencies WHERE agency_id IN
+         (SELECT id FROM agencies WHERE license_number = 'E2E-USERS')`,
+    );
+    await pool.query("DELETE FROM users WHERE email = 'tester@example.com'");
+    await pool.query("DELETE FROM agencies WHERE license_number = 'E2E-USERS'");
 
     // 8. DELETE + restore are gated by the CALLER's role.
     console.log('7. DELETE / restore role gates');
