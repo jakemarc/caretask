@@ -4936,3 +4936,109 @@ label.contact-picker-row {
     display: none;
   }
 }
+
+/* Add Patient, Google Contacts style (Jake's reference photos,
+   2026-11-03): icon rows, the placeholder IS the label, the
+   rarely used fields behind Show more, Save pinned top-right
+   in a sticky header with a back arrow. */
+.gform-head {
+  display: flex; align-items: center; gap: 10px;
+  max-width: 560px; padding: 8px 0 12px; margin-bottom: 6px;
+  position: sticky; top: 0; z-index: 40; background: var(--bg);
+}
+@media (max-width: 720px) {
+  .app-shell:not(.force-desktop) .gform-head { top: 72px; }
+}
+.gform-back {
+  width: 38px; height: 38px; flex: none; border-radius: 50%;
+  border: 1px solid var(--border); background: transparent;
+  color: var(--text); display: inline-flex; align-items: center;
+  justify-content: center; cursor: pointer;
+}
+.gform-title { font-size: 18px; font-weight: 700; }
+.gform-spacer { flex: 1; }
+.gform { max-width: 560px; gap: 20px; }
+.gform-row { display: flex; gap: 14px; align-items: flex-start; }
+.gform-ico {
+  width: 24px; flex: none; padding-top: 10px;
+  display: flex; justify-content: center; color: var(--ink-2, #5b6b7a);
+}
+.gform-fields {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px;
+}
+.gform-fields .form-field { font-size: 14px; }
+.gform-cap { font-size: 12px; color: var(--ink-2, #5b6b7a); margin-bottom: -4px; }
+.gform-more-btn {
+  align-self: flex-start; display: inline-flex; align-items: center; gap: 4px;
+  background: none; border: none; padding: 4px 0; cursor: pointer;
+  color: #2563eb; font: inherit; font-size: 14px; font-weight: 600;
+}
+.gform-chev { transition: transform .18s ease; }
+.gform-chev.open { transform: rotate(180deg); }
+.text-intake-text {
+  width: 100%; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg); color: var(--text);
+  padding: 10px 12px; font: inherit; font-size: 14px;
+  resize: vertical;
+}
+
+/* Add-field dropdown (replaces the Show more block): each
+   optional field is added on demand and can be removed again
+   (removing clears its value, so nothing saves invisibly). */
+.gform-addwrap { position: relative; align-self: flex-start; }
+.gform-backdrop {
+  position: fixed; inset: 0; z-index: 49;
+  background: transparent; border: none; padding: 0; cursor: default;
+}
+.gform-addmenu {
+  position: absolute; left: 0; top: calc(100% + 6px); z-index: 50;
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 12px; box-shadow: 0 12px 32px rgba(15, 40, 55, .16);
+  padding: 6px; min-width: 220px;
+  display: flex; flex-direction: column;
+}
+.gform-addmenu button {
+  display: flex; gap: 10px; align-items: center;
+  padding: 9px 10px; border: none; background: none; font: inherit;
+  font-size: 14px; color: var(--text); border-radius: 8px;
+  cursor: pointer; text-align: left;
+}
+.gform-addmenu button:hover { background: rgba(100, 116, 139, .1); }
+.gform-remove {
+  flex: none; width: 32px; height: 32px; margin-top: 6px;
+  border-radius: 50%; border: none; background: none;
+  color: var(--ink-2, #5b6b7a); display: inline-flex;
+  align-items: center; justify-content: center; cursor: pointer;
+}
+
+/* Per-row Edit (pencil) on day-list + agenda appointment rows:
+   opens the booking form directly, without hunting for the
+   detail card below the list. */
+.cal-row-wrap { position: relative; }
+.cal-row-wrap .cal-day-row { padding-right: 48px; }
+.cal-row-edit {
+  position: absolute; right: 8px; top: 50%;
+  transform: translateY(-50%); z-index: 2;
+  width: 32px; height: 32px; border-radius: 50%;
+  border: 1px solid var(--border); background: var(--panel);
+  color: var(--muted); display: inline-flex;
+  align-items: center; justify-content: center; cursor: pointer;
+}
+
+/* Patients page Add Patient button: desktop shows the words
+   alone — no + icon (Jake, 2026-11-03). Phones keep the
+   icon-only collapse above. */
+@media (min-width: 721px) {
+  .add-patient-btn > svg {
+    display: none;
+  }
+}
+
+/* The booking page's back row keeps clear of the fixed mobile
+   top bar when it is scrolled into view on open. */
+.cal-book-head { scroll-margin-top: 12px; }
+@media (max-width: 720px) {
+  .app-shell:not(.force-desktop) .cal-book-head {
+    scroll-margin-top: 84px;
+  }
+}

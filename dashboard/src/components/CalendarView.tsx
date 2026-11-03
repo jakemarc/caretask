@@ -23,6 +23,7 @@ import {
   LayoutGrid,
   List,
   Map as MapIcon,
+  Pencil,
 } from "lucide-react";
 import DayScheduleMap from "./DayScheduleMap";
 import type { MapPatientLike } from "../lib/geo";
@@ -272,6 +273,10 @@ export default function CalendarView({
     pointerType: string;
   } | null>(null);
   const suppressClickRef = useRef(false);
+  const detailRef = useRef<HTMLElement | null>(null);
+  const bookHeadRef = useRef<HTMLDivElement | null>(null);
+  const sectionRef = useRef<HTMLElement | null>(null);
+  const bookScrollMounted = useRef(false);
   const [saving, setSaving] = useState(false);
 
   // Delete is role-gated (manager/admin): managers get a
@@ -501,6 +506,26 @@ export default function CalendarView({
     // the meaningful triggers.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [intent, apiConnected, cats]);
+
+  useEffect(() => {
+    if (!bookScrollMounted.current) {
+      bookScrollMounted.current = true;
+      return;
+    }
+    const target = bookingPage ? bookHeadRef.current : sectionRef.current;
+    requestAnimationFrame(() => {
+      target?.scrollIntoView({ block: "start" });
+    });
+  }, [bookingPage]);
+
+  useEffect(() => {
+    if (selectedId && window.matchMedia("(max-width: 720px)").matches) {
+      detailRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+      });
+    }
+  }, [selectedId]);
 
   function openCreate(day: Date, hour = 9) {
     // Jake's defaults (2026-11-02): the category starts on
@@ -937,8 +962,8 @@ export default function CalendarView({
           <p className="section-note">Nothing scheduled.</p>
         )}
         {items.map((a) => (
+          <div className="cal-row-wrap" key={a.id}>
           <button
-            key={a.id}
             className="cal-day-row"
             style={{ borderLeftColor: a.category_color }}
             onClick={() => setSelectedId(a.id)}
@@ -949,9 +974,7 @@ export default function CalendarView({
               <span className="card-meta">
                 {" "}
                 · {a.category_name}
-                {a.provider_name ? ` · ${a.provider_name}` : ""}
-                {agencyNameFor(a) ? ` · ${agencyNameFor(a)}` : ""} ·{" "}
-                <span className={`cal-status cal-status-${statusMeta(a.status)?.tone ?? "gray"}`}>{statusLabel(a.status)}</span>
+                {agencyNameFor(a) ? ` · ${agencyNameFor(a)}` : ""}
               </span>
             </span>
             <span className="cal-day-compact">
@@ -963,6 +986,14 @@ export default function CalendarView({
               </span>
             </span>
           </button>
+          <button
+            className="cal-row-edit"
+            aria-label="Edit appointment"
+            onClick={() => openEdit(a)}
+          >
+            <Pencil size={15} />
+          </button>
+          </div>
         ))}
         <button
           className="btn"
@@ -975,7 +1006,7 @@ export default function CalendarView({
   };
 
   return (
-    <section>
+    <section ref={sectionRef}>
       <h1 className="cal-page-title">Calendar</h1>
       {!apiConnected && (
         <article className="card">
@@ -1229,8 +1260,8 @@ export default function CalendarView({
                     })}
                   </h3>
                   {items.map((a) => (
+                    <div className="cal-row-wrap" key={a.id}>
                     <button
-                      key={a.id}
                       className="cal-day-row"
                       style={{ borderLeftColor: a.category_color }}
                       onClick={() => setSelectedId(a.id)}
@@ -1243,11 +1274,7 @@ export default function CalendarView({
                         <span className="card-meta">
                           {" "}
                           · {a.category_name}
-                          {a.provider_name
-                            ? ` · ${a.provider_name}`
-                            : ""}{" "}
-                          {agencyNameFor(a) ? ` · ${agencyNameFor(a)}` : ""} ·{" "}
-                <span className={`cal-status cal-status-${statusMeta(a.status)?.tone ?? "gray"}`}>{statusLabel(a.status)}</span>
+                          {agencyNameFor(a) ? ` · ${agencyNameFor(a)}` : ""}
                         </span>
                       </span>
                       <span className="cal-day-compact">
@@ -1259,6 +1286,14 @@ export default function CalendarView({
                         </span>
                       </span>
                     </button>
+                    <button
+                      className="cal-row-edit"
+                      aria-label="Edit appointment"
+                      onClick={() => openEdit(a)}
+                    >
+                      <Pencil size={15} />
+                    </button>
+                    </div>
                   ))}
                 </div>
               ))}
@@ -1276,7 +1311,7 @@ export default function CalendarView({
           )}
 
           {selected && (
-            <article className="card cal-detail">
+            <article className="card cal-detail" ref={detailRef}>
               <div className="card-top">
                 <strong>
                   {selected.patient_name ?? selected.title}
@@ -1406,7 +1441,7 @@ export default function CalendarView({
 
           </>)}
           {bookingPage && formOpen && (
-            <div className="cal-book-head">
+            <div className="cal-book-head" ref={bookHeadRef}>
               <button
                 className="btn"
                 onClick={() => {
@@ -1444,7 +1479,7 @@ export default function CalendarView({
                   </label>
                   {editScope === "series" && (
                     <span className="cal-scope-note">
-                      Type, provider, title, room and notes change for
+                      Type, provider, title and notes change for
                       every visit; dates and times stay per-visit.
                     </span>
                   )}
@@ -1512,27 +1547,27 @@ export default function CalendarView({
                       </div>
                     </div>
                   )}
-                  <div className="form-field form-wide">
-                    <span>Visit type</span>
-                    <div className="cal-chiprow">
+                  <label className="form-wide">
+                    Visit type
+                    <select
+                      value={fCategory}
+                      onChange={(e) => {
+                        setFCategory(e.target.value);
+                        const cat = cats.find(
+                          (c) => String(c.id) === e.target.value,
+                        );
+                        if (cat) setFDuration(cat.default_duration_min);
+                      }}
+                    >
                       {cats
                         .filter((c) => c.cattype === "appointment")
                         .map((c) => (
-                          <button
-                            type="button"
-                            key={c.id}
-                            className={`cal-chipbtn${String(c.id) === fCategory ? " on" : ""}`}
-                            style={{ borderColor: c.color }}
-                            onClick={() => {
-                              setFCategory(String(c.id));
-                              setFDuration(c.default_duration_min);
-                            }}
-                          >
+                          <option key={c.id} value={String(c.id)}>
                             {c.name}
-                          </button>
+                          </option>
                         ))}
-                    </div>
-                  </div>
+                    </select>
+                  </label>
                   <label>
                     Provider
                     <select
@@ -1716,15 +1751,6 @@ export default function CalendarView({
                       </option>
                     ))}
                   </select>
-                </label>
-                <label>
-                  Room
-                  <input
-                    type="text"
-                    value={fRoom}
-                    onChange={(e) => setFRoom(e.target.value)}
-                    placeholder="Room 1"
-                  />
                 </label>
                 {editing && (
                   <label>
