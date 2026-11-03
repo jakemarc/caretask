@@ -12,7 +12,6 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { execFile } = require('child_process');
 const bcrypt = require('bcryptjs');
 const pool = require('../db');
 const { insertEvent } = require('./eventLog');
@@ -144,14 +143,13 @@ function writeHtpasswd(entries) {
   const body = [...entries.entries()].map(([u, h]) => `${u}:${h}`).join('\n') + '\n';
   fs.writeFileSync(tmp, body, { mode: 0o600 });
   fs.renameSync(tmp, c.htpasswdPath);
-  maybeReloadRadicale();
-}
-
-function maybeReloadRadicale() {
-  // Radicale may cache the htpasswd file; on the VM the API user
-  // has a narrow sudoers rule for reloading just this service.
-  if (process.env.CARDDAV_HTPASSWD_RELOAD !== 'systemctl') return;
-  execFile('sudo', ['-n', 'systemctl', 'reload-or-restart', 'radicale'], () => {});
+  // NO reload/restart here on purpose: Radicale re-reads the
+  // htpasswd file on every request (verified in the e2e suite —
+  // a regenerated password works immediately, the old one 401s).
+  // An earlier version restarted Radicale at this point via a
+  // sudoers rule; the restart raced the DAV calls that follow
+  // (enable -> ensureBook hit ECONNREFUSED) and every enable
+  // failed with a 500 on the live VM (2026-11-03, deploy-37 fix).
 }
 
 function setDavPassword(davUsername, plain) {
