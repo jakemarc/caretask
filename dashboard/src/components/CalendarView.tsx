@@ -16,6 +16,14 @@ import {
   type AppointmentStatusInfo,
 } from "../lib/patientApi";
 import { isManagerRole, useMyStaff } from "../lib/useMyRole";
+import {
+  CalendarDays,
+  CalendarRange,
+  ChevronLeft,
+  LayoutGrid,
+  List,
+  Map as MapIcon,
+} from "lucide-react";
 import DayScheduleMap from "./DayScheduleMap";
 import type { MapPatientLike } from "../lib/geo";
 
@@ -235,6 +243,10 @@ export default function CalendarView({
   // creating starts on the compact card; "More options" (or
   // editing) shows the full form.
   const [formSimple, setFormSimple] = useState(true);
+  // The booking form is its own PAGE (Jake, 2026-11-03): opening
+  // it swaps the calendar out entirely instead of stacking a
+  // card under the grid; saving or backing out returns here.
+  const [bookingPage, setBookingPage] = useState(false);
   const [editScope, setEditScope] = useState<"single" | "series">(
     "single",
   );
@@ -523,6 +535,7 @@ export default function CalendarView({
     setRepOn(false);
     setRepWeekdays([1, 3, 5]);
     setRepPhases([{ perWeek: 2, weeks: 2 }]);
+    setBookingPage(true);
     setFormOpen(true);
   }
 
@@ -551,6 +564,7 @@ export default function CalendarView({
     setFormSimple(false);
     setEditScope("single");
     setRepOn(false);
+    setBookingPage(true);
     setFormOpen(true);
   }
 
@@ -736,6 +750,7 @@ export default function CalendarView({
           prev.map((a) => rows.find((r) => r.id === a.id) ?? a),
         );
         setFormOpen(false);
+        setBookingPage(false);
         setNotice(`Saved changes to ${rows.length} series visits.`);
         return;
       }
@@ -749,6 +764,9 @@ export default function CalendarView({
         });
         setRefreshTick((t) => t + 1);
         setFormOpen(false);
+        setBookingPage(false);
+        setAnchor(startOfDay(seriesStarts[0]));
+        setSelectedDay(dayKey(seriesStarts[0]));
         setNotice(
           `Created ${out.appointments.length} appointments in the series.`,
         );
@@ -765,10 +783,15 @@ export default function CalendarView({
         );
         setSelectedId(updated.id);
       } else {
-        await createAppointment(user, buildInput());
+        const input = buildInput();
+        await createAppointment(user, input);
         setRefreshTick((t) => t + 1);
+        const first = new Date(input.starts_at);
+        setAnchor(startOfDay(first));
+        setSelectedDay(dayKey(first));
       }
       setFormOpen(false);
+      setBookingPage(false);
     } catch (err) {
       setNotice(
         err instanceof Error ? err.message : "Couldn't save the appointment.",
@@ -953,7 +976,7 @@ export default function CalendarView({
 
   return (
     <section>
-      <h1>Calendar</h1>
+      <h1 className="cal-page-title">Calendar</h1>
       {!apiConnected && (
         <article className="card">
           <strong>Calendar needs the patient API connection.</strong>
@@ -966,8 +989,9 @@ export default function CalendarView({
       )}
       {apiConnected && (
         <>
+          {!bookingPage && (<>
           <div className="cal-toolbar">
-            <div className="cal-nav">
+            <div className="cal-nav cal-pager">
               <button className="btn" onClick={() => step(-1)} aria-label="Previous">
                 ‹
               </button>
@@ -989,49 +1013,62 @@ export default function CalendarView({
             <div className="cal-nav">
               {(
                 [
-                  ["agenda", "Day"],
-                  ["3day", "3 Day"],
-                  ["week", "Week"],
-                  ["month", "Month"],
-                  ["map", "Map"],
-                ] as [CalView, string][]
-              ).map(([v, label]) => (
+                  ["agenda", "Day", List],
+                  ["3day", "3 Day", CalendarRange],
+                  ["week", "Week", CalendarDays],
+                  ["month", "Month", LayoutGrid],
+                  ["map", "Map", MapIcon],
+                ] as [CalView, string, typeof List][]
+              ).map(([v, label, Icon]) => (
                 <button
                   key={v}
-                  className={view === v ? "btn btn-primary" : "btn"}
-                  onClick={() => setView(v)}
+                  className={`cal-view-btn ${view === v ? "btn btn-primary" : "btn"}`}
+                  onClick={() => {
+                    setView(v);
+                    if (
+                      v === "agenda" &&
+                      window.matchMedia("(max-width: 720px)").matches
+                    ) {
+                      setAnchor(startOfDay(new Date()));
+                      setSelectedDay(dayKey(new Date()));
+                    }
+                  }}
                 >
+                  <Icon size={14} />
                   {label}
                 </button>
               ))}
-              {agencyOptions.length > 0 && (
-                <select
-                  className="cal-agency-filter"
-                  value={agencyFilter}
-                  onChange={(e) => setAgencyFilter(e.target.value)}
-                  aria-label="Filter appointments by agency"
-                  title="Show appointments for one agency"
-                >
-                  <option value="all">All agencies</option>
-                  {agencyOptions.map((o) => (
-                    <option key={o.key} value={o.key}>
-                      {o.label}
-                    </option>
-                  ))}
-                  <option value="none">No agency</option>
-                </select>
-              )}
-              <button
-                className="btn btn-primary"
-                onClick={() => openCreate(anchor)}
-              >
-                + New appointment
-              </button>
+
             </div>
           </div>
 
           {notice && <p className="pin-error">{notice}</p>}
 
+          <div className="cal-filterbar">
+            {agencyOptions.length > 0 && (
+              <select
+                className="cal-agency-filter"
+                value={agencyFilter}
+                onChange={(e) => setAgencyFilter(e.target.value)}
+                aria-label="Filter appointments by agency"
+                title="Show appointments for one agency"
+              >
+                <option value="all">All agencies</option>
+                {agencyOptions.map((o) => (
+                  <option key={o.key} value={o.key}>
+                    {o.label}
+                  </option>
+                ))}
+                <option value="none">No agency</option>
+              </select>
+            )}
+            <button
+              className="btn btn-primary cal-new-btn"
+              onClick={() => openCreate(anchor)}
+            >
+              + New appointment
+            </button>
+          </div>
           {view === "month" && (
             <>
               <div className="cal-grid cal-month">
@@ -1054,7 +1091,12 @@ export default function CalendarView({
                       key={dayKey(day)}
                       className={`cal-cell${inMonth ? "" : " cal-out"}${isToday ? " cal-today" : ""}${selectedDay === dayKey(day) ? " cal-selected" : ""}${dragOverDay === toDateInput(day) ? " cal-drop" : ""}`}
                       data-day={toDateInput(day)}
-                      onClick={() => setSelectedDay(dayKey(day))}
+                      onClick={() => {
+                        setSelectedDay(dayKey(day));
+                        if (day.getMonth() !== anchor.getMonth()) {
+                          setAnchor(startOfDay(day));
+                        }
+                      }}
                       onDoubleClick={() => openCreate(day)}
                     >
                       <span className="cal-date">{day.getDate()}</span>
@@ -1362,6 +1404,20 @@ export default function CalendarView({
             </article>
           )}
 
+          </>)}
+          {bookingPage && formOpen && (
+            <div className="cal-book-head">
+              <button
+                className="btn"
+                onClick={() => {
+                  setFormOpen(false);
+                  setBookingPage(false);
+                }}
+              >
+                <ChevronLeft size={15} /> Calendar
+              </button>
+            </div>
+          )}
           {formOpen && (
             <article className="card cal-form">
               <h3>{editing ? "Edit appointment" : "New appointment"}</h3>
@@ -1856,7 +1912,10 @@ export default function CalendarView({
                 )}
                 <button
                   className="btn"
-                  onClick={() => setFormOpen(false)}
+                  onClick={() => {
+                    setFormOpen(false);
+                    setBookingPage(false);
+                  }}
                 >
                   Cancel
                 </button>
