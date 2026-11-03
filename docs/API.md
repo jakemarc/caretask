@@ -1,7 +1,10 @@
 # Patient API — Developer Guide
 
-Last updated: 2026-10-30
+Last updated: 2026-11-03
 Live: https://api.marcinnotech.net
+The multi-user platform sections below are **Live — deploy-35, 2026-11-03**
+(built + suite-verified, not yet deployed); everything else
+describes the live API.
 Source: `~/workspace/marc-innotech/patient-api/`
 Full reference: that folder's `README.md` (prerequisites, migration
 order, per-endpoint details). This doc is the working summary.
@@ -16,9 +19,16 @@ behind Caddy on the VM. Config from `~/patient-api/.env` on the VM
 
 ```
 server.js            app wiring, CORS
-auth.js              Firebase ID-token verification + allowlist
+auth.js              Firebase ID-token verification (the
+                     ALLOWED_EMAILS allowlist retired by the
+                     platform — Live — deploy-35, 2026-11-03: the perimeter
+                     is the staff-record gate, see below)
 db.js                pg pool
+lib/platform.js      staff resolution, chart access, episode
+                     helpers (Live — deploy-35, 2026-11-03)
 routes/patients.js   patient CRUD + soft delete/restore + audit fetch
+routes/episodes.js   episodes + teams (Live — deploy-35, 2026-11-03)
+routes/invites.js    invite-only sign-up (Live — deploy-35, 2026-11-03)
 routes/users.js      staff directory + role-gated staff writes
 routes/events.js     event query + chain verify + client event intake
 lib/pin.js           scrypt PIN hashing (DORMANT since 2026-11-02:
@@ -53,11 +63,19 @@ also records its reason on the `auth_failure` event
 missing/invalid token, 403 only for a verified token whose email
 is not allowlisted.
 
+**Platform change (Live — deploy-35, 2026-11-03, not yet deployed):** the
+allowlist is retired. `auth.js` verifies the token only; every
+router except `/invites` then passes `requireStaff` — the token
+must resolve to an ACTIVE users row (firebase_uid, else email)
+or the request is 403 `NO_STAFF_RECORD`. The live
+`ALLOWED_EMAILS` env var becomes vestigial at that deploy. See
+the platform section below.
+
 | Route | Notes |
 |---|---|
 | `GET /health` | open; liveness |
-| `GET /patients?q=&status=` | q matches fname/lname/preferred_name/email (ILIKE) |
-| `POST /patients` | create (NOT gated — intake is a front-desk act). Requires only `fname` + `lname`. `date_of_birth` and `sex` are OPTIONAL (Jake, 2026-11-01 — they were required 2026-10-30 → 2026-11-01 with 400 `DOB_REQUIRED` / `SEX_REQUIRED`; those codes are retired). An empty-string `date_of_birth` normalizes to NULL; a provided one must still be YYYY-MM-DD. Accepts the stored-age fallback `age` (integer 0–130, else 400) for patients whose birth date is unknown. |
+| `GET /patients?q=&status=` | q matches fname/lname/preferred_name/email (ILIKE). **Platform (Live, deploy-35):** returns only the caller's LINKED patients, each row's `status` = the caller's link status; `?all=1` (platform admin) returns the whole registry with registry status |
+| `POST /patients` | create (NOT gated — intake is a front-desk act). Requires only `fname` + `lname`. `date_of_birth` and `sex` are OPTIONAL (Jake, 2026-11-01 — they were required 2026-10-30 → 2026-11-01 with 400 `DOB_REQUIRED` / `SEX_REQUIRED`; those codes are retired). An empty-string `date_of_birth` normalizes to NULL; a provided one must still be YYYY-MM-DD. Accepts the stored-age fallback `age` (integer 0–130, else 400) for patients whose birth date is unknown. **Platform (Live, deploy-35):** runs the registry duplicate rules first — exact match → 409 `PATIENT_EXISTS`, near match → 409 `POSSIBLE_MATCH` (override with `confirm_create: true`); a successful create auto-links the patient to the creator's list |
 
 Patient agency fields (built locally 2026-10-30, not yet
 deployed): create/update accept `agency_id` (integer; must
@@ -76,10 +94,30 @@ the patient's agency history.
 | `PUT /patients/:id` | NOT gated (any signed-in user; the caller's staff identity is attached for audit attribution) |
 | `DELETE /patients/:id` | **Role-gated (manager/admin)**; soft delete (deleted_at) |
 | `POST /patients/:id/restore` | **Role-gated (manager/admin)** |
+| `POST /patients/:id/link` | **Platform (Live, deploy-35):** add the patient to MY list (idempotent; revives a removed link as active) |
+| `DELETE /patients/:id/link` | **Platform (Live, deploy-35):** remove from MY list (404 `NOT_LINKED` when not linked) |
+| `PUT /patients/:id/link` | **Platform (Live, deploy-35):** set MY list status `{list_status}` (active/hold/discharged) |
+| `GET /patients/:id/episodes` | **Platform (Live, deploy-35):** the patient's episodes, newest first, each with its team (chart access) |
+| `POST /patients/:id/episodes` | **Platform (Live, deploy-35):** open an episode `{agency_id, admitted_at?}` — caller becomes primary; 409 `EPISODE_ACTIVE` names the holding agency + primary |
+| `POST /episodes/:id/discharge` | **Platform (Live, deploy-35):** discharge `{discharged_at?, discharge_reason?, discharge_note?}` — works from active or on hold (an open hold closes at the discharge date); manager = primary, case manager, or manager/admin of the agency |
+| `POST /episodes/:id/recertify` | **Platform (Live, deploy-35):** close + reopen same-agency with the team copied (active episodes only; on hold → 409 `EPISODE_ON_HOLD`) |
+| `PUT /episodes/:id/primary` | **Platform (Live, deploy-35):** hand the primary role to another current member |
+| `PUT /episodes/:id/case-manager` | **Platform (Live — deploy-35, addendum 2026-11-03):** hand case management to another current member (400 `NOT_ON_TEAM`) |
+| `POST /episodes/:id/hold` | **Platform (Live — deploy-35, addendum 2026-11-03):** put the episode on hold `{reason?, note?, started_on?}` (reasons: hospitalized / patient_request / physician_order / other) |
+| `POST /episodes/:id/resume` | **Platform (Live — deploy-35, addendum 2026-11-03):** end the current hold `{resumed_on?}` |
+| `POST /episodes/:id/members` | **Platform (Live, deploy-35):** add a teammate `{user_id, supervised_by?}` (must belong to the episode's agency; auto-links the patient to them) |
+| `DELETE /episodes/:id/members/:userId` | **Platform (Live, deploy-35):** remove a teammate (400 `CANNOT_REMOVE_PRIMARY` for the primary) |
+| `GET /users/me/agencies` | **Platform (Live, deploy-35):** my agency memberships (light rows: id, name, display_name, city, state) |
+| `POST /users/me/agencies` | **Platform (Live, deploy-35):** join an agency `{agency_id}` |
+| `DELETE /users/me/agencies/:agencyId` | **Platform (Live, deploy-35):** leave an agency (409 `PRIMARY_ON_ACTIVE_EPISODE`) |
+| `POST /invites` | **Platform (Live, deploy-35): platform admin** — create an invite `{email, role}`; the raw `code` + `accept_path` return ONCE (only the SHA-256 hash is stored); 7-day expiry; 409 `ALREADY_STAFF` |
+| `GET /invites` | **Platform (Live, deploy-35): platform admin** — invites with derived status (pending/accepted/revoked/expired) |
+| `DELETE /invites/:id` | **Platform (Live, deploy-35): platform admin** — revoke a pending invite |
+| `POST /invites/accept` | **Platform (Live, deploy-35):** the one route open without a staff record — `{code, fname?, lname?}`; the token's email must match the invite (403 `INVITE_EMAIL_MISMATCH`); creates or claims the staff record with the invite's role |
 | `GET /patients/:id/audit` | audit_log rows for the patient |
 | `GET /users` | staff list — safe columns only, `pin_hash` is NEVER returned (`has_pin` boolean instead) |
 | `GET /users/me` | caller's staff row or null |
-| `GET /users/clinicians` | authorized AND active staff (the assignable providers) |
+| `GET /users/clinicians` | authorized AND active staff (the assignable providers). **Platform (Live, deploy-35):** scoped to the caller's agency colleagues + the caller (platform admins see everyone) |
 | `POST /users` | **Role-gated (manager/admin)** create; 409 `EMAIL_EXISTS` on duplicate |
 | `PUT /users/:id` | **Role-gated (manager/admin)**; a `pin` field in the body is ignored (PINs retired 2026-11-02; `pin_hash` column dormant) |
 | `DELETE /users/:id` | **Role-gated (manager/admin)** DEACTIVATE (active=false — rows are never hard-deleted); 400 `SELF_DEACTIVATE` for your own account |
@@ -106,8 +144,8 @@ the patient's agency history.
 | `DELETE /documents/:id` | **Role-gated (manager/admin)** soft delete |
 | `POST /documents/:id/restore` | **Role-gated (manager/admin)** undo soft delete (409 `NOT_DELETED` when not deleted) |
 | `GET /appointments/statuses` | status list in flow order, with is_checkin/is_checkout flags |
-| `GET /appointments?from=&to=&patient_id=&provider_id=` | overlap-window list, joined with patient/provider/category names |
-| `POST /appointments` | create (NOT gated — booking is a front-desk act) |
+| `GET /appointments?from=&to=&patient_id=&provider_id=` | overlap-window list, joined with patient/provider/category names. **Platform (Live, deploy-35):** default scope is PERSONAL (my visits + unassigned visits on my episodes); `patient_id=` returns that patient's MASTER schedule (chart access); `?scope=all` is the manager/admin/developer practice view (403 `SCOPE_FORBIDDEN`) |
+| `POST /appointments` | create (NOT gated — booking is a front-desk act). **Platform (Live, deploy-35):** patient visits pass the episode gate — no live episode → booked as a personal visit, `episode_id` NULL (solo mode); episode on hold → 409 `EPISODE_ON_HOLD` (a single Resumption of Care booking is the exception — it ends the hold); with a live episode the provider must be on the episode team, or a same-agency colleague covering a single (non-series) visit, else 403 `NOT_ON_TEAM`; the row is stamped with `episode_id` |
 | `PUT /appointments/:id` | NOT gated update (attribution recorded; enables drag-reschedule) |
 | `POST /appointments/:id/status` | status-only change (NOT gated — flow-board pattern); logged with from/to |
 | `DELETE /appointments/:id` | **Role-gated (manager/admin)**; soft delete |
@@ -380,15 +418,126 @@ belong to the same patient (400 `APPOINTMENT_NOT_FOUND` /
 (`document_create` / `document_update` / `document_finalize`)
 carry ids and doc_type only — never title or section content.
 
+## Multi-user platform (lib/platform.js, routes/episodes.js, routes/invites.js) — Live — deploy-35, 2026-11-03
+
+Jake's design (2026-11-03), informed by same-day model research
+on Epic, Homecare Homebase, and OpenEMR; full spec in
+`~/workspace/marc-innotech/multi-user-platform-spec.md`. Built and
+verified locally (65-check platform suite + the full legacy
+battery green); **not yet deployed** — deploy needs Jake's go,
+and `migrate-platform.sql` gets reviewed before it runs live.
+
+- **Registry + personal lists.** `patients` is a single master
+  registry ("their data becomes our data"). What a clinician
+  sees is governed by `patient_links` (per-user list + list
+  status). List status moved OFF the shared record onto the
+  link; a `status` in a patient PUT still syncs the caller's own
+  link as a bridge.
+- **Chart access** (`hasChartAccess`): platform admin, OR a live
+  link, OR membership of ANY of the patient's episodes (current
+  team, incl. discharged episodes — history stays readable to
+  those who worked it), OR a **coverage visit**: a non-cancelled
+  appointment for this patient with the caller as provider
+  within ±7 days (the HCHB field rule). No access → 404 (the
+  record's existence is not leaked).
+- **Duplicate rules on create.** Exact (normalized first+last
+  name + DOB; or name + phone/email when either DOB is missing)
+  → hard block 409 `PATIENT_EXISTS` with the record's id/name/
+  DOB/city + `already_linked` — the answer is "Add to my list",
+  never a second record. Near (same DOB + similar name, same
+  phone, same email, or same name alone) → 409 `POSSIBLE_MATCH`
+  with ≤3 candidates; `confirm_create: true` overrides and is
+  event-logged. **Known Non-Duplicates (Epic's KND, adapted):**
+  a confirmed create stores (candidate, intake-fingerprint)
+  dismissals, so the same intake data never prompts again for
+  that pair. Exact matches are never suppressed.
+- **Episodes are the unit of sharing.** `patient_episodes` +
+  `episode_members`; a partial unique index enforces ONE live
+  episode per patient across the whole platform. An episode
+  belongs to one agency, has one primary (its opener; manages
+  the team; discharges) and any number of members from the same
+  agency, with an optional `supervised_by` pointer (PTA → PT).
+  Same-agency handoff = add/remove members, no discharge.
+  Another agency can only admit after discharge; the 409 names
+  the holding agency + primary (no clinical detail). Recertify
+  closes and reopens same-agency with the team copied and
+  `recert_of` chaining the history.
+- **Holds, discharge reasons, case manager (addendum,
+  Jake 2026-11-03).** An episode may be ON HOLD (status
+  `on_hold`; each hold is an `episode_holds` row with reason /
+  note / dates) — the hospitalized-patient case: the episode
+  still owns the patient (the unique index covers
+  active + on_hold), booking refuses with 409
+  `EPISODE_ON_HOLD`, and a single Resumption of Care booking
+  ends the hold in the same transaction. Discharge records a
+  structured `discharge_reason` (completed / patient_declined /
+  transferred_agency / transferred_inpatient /
+  moved_out_of_area / physician_order / deceased / other) — the
+  "couldn't finish" accounting. `case_manager_user_id` names
+  one team member as the clinical coordinator (HCHB's
+  episode-header role): defaults to the primary, transferable
+  via `PUT /episodes/:id/case-manager`, holds full management
+  rights, and cannot be removed from the team until a
+  successor is named (400 `CANNOT_REMOVE_CASE_MANAGER`).
+- **Booking gate.** WHEN a patient has a live episode, a visit
+  is stamped with its id and the provider must be a current
+  team member; a colleague from the episode's agency may take
+  a SINGLE coverage visit without joining the team (series
+  stay team-only). Unassigned bookings require the booker to
+  be on the team (or a platform admin). Pure reschedules
+  (drag) are never re-gated. On a held episode the gate
+  answers 409 `EPISODE_ON_HOLD` except for the ROC rule above.
+  **Solo mode (Jake, 2026-11-03):** when the patient has NO
+  live episode, booking just works and the visit stays
+  unstamped — a personal practice visit. Episodes are the
+  unit of sharing, not a toll booth for booking; the gate
+  engages only once an episode exists. (`NO_ACTIVE_EPISODE`
+  is retired.)
+- **Calendars.** Default = personal. `?patient_id=` = the
+  patient's master schedule (all team members' visits, provider
+  names shown — double-bookings are shown, not blocked).
+  `?scope=all` = practice view for manager/admin/developer.
+- **Invites.** Invite-only sign-up (Jake's call over the
+  open-sign-up recommendation). Admin creates by email + role;
+  only the code's SHA-256 is stored; acceptance requires the
+  signed-in token's email to match the invite. Accepting creates
+  (or claims/reactivates) the staff record with
+  `authorized = true` and a blank workspace by construction.
+- **Migration** (`migrate-platform.sql`, pure SQL, idempotent):
+  every patient links to Jake's admin row (plus any staff with
+  appointments on them); patients with an agency get an episode
+  (primary = earliest appointment's provider, else the admin;
+  members = distinct appointment providers + the primary;
+  appointments stamped); agency memberships derive from the
+  episodes (admin → all agencies on patients). Verified against
+  a scratch fixture before ever touching live data.
+- **New event types** (additive only, per the audit rule):
+  `patient_link`, `patient_unlink`, `episode_create`,
+  `episode_discharge`, `episode_team`, `episode_hold`,
+  `episode_resume`, `episode_case_manager`, `invite_create`,
+  `invite_accept`, `agency_membership`.
+- **Error codes:** `PATIENT_EXISTS`, `POSSIBLE_MATCH`,
+  `EPISODE_ACTIVE`, `EPISODE_NOT_ACTIVE`,
+  `EPISODE_ON_HOLD`, `ALREADY_ON_HOLD`, `NOT_ON_HOLD`,
+  `NOT_ON_TEAM`, `NOT_AGENCY_MEMBER`, `AGENCY_NOT_FOUND`,
+  `NOT_LINKED`, `CANNOT_REMOVE_PRIMARY`,
+  `CANNOT_REMOVE_CASE_MANAGER`,
+  `PRIMARY_ON_ACTIVE_EPISODE`, `SCOPE_FORBIDDEN`,
+  `ADMIN_REQUIRED`, `INVITE_INVALID`, `INVITE_USED`,
+  `INVITE_EXPIRED`, `INVITE_EMAIL_MISMATCH`, `ALREADY_STAFF`,
+  `USER_NOT_FOUND`, `SUPERVISOR_NOT_ON_TEAM`.
+
 ## Known gaps (deliberate, tracked)
 
 - `patients.clinician` is still free text ("Unassigned" default);
   the patient form is not yet wired to pick from `GET
   /users/clinicians`.
 - Roles are enforced for writes via the role gates above
-  (manager/admin) since 2026-11-02; finer READ-side scoping
-  (e.g., a developer role seeing the Audit Log but not patient
-  rows) is still future API work.
+  (manager/admin) since 2026-11-02. READ-side scoping arrived
+  with the platform (Live — deploy-35, 2026-11-03): patient lists are
+  link-scoped and chart reads follow episode-team / link /
+  coverage access. Still future: role-based Audit Log scoping
+  (e.g., a developer role seeing the Log but not patient rows).
 - Audit snapshots include `ss` / `drivers_license` verbatim —
   redaction is required before any real data (see ARCHITECTURE.md).
 - Appointments: recurrence ships as the series model above

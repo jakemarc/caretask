@@ -4,6 +4,151 @@ All notable shipped changes to the CareTask platform. Newest first.
 "Live" means deployed and verified at the listed URL; "Local" means
 built and verified but not deployed.
 
+## 2026-11-03
+
+- **Multi-user platform — LIVE as deploy-35, 2026-11-03.**
+  (Built + verified locally first; Jake reviewed the migration
+  walkthrough, then said deploy.) Jake's design, informed by same-day model
+  research on Epic, Homecare Homebase, and OpenEMR (reports in
+  `~/workspace/research_notes/`); spec in
+  `~/workspace/marc-innotech/multi-user-platform-spec.md`.
+  CareTask stops being a single-user app: (1) **Master patient
+  registry + personal lists** — one record per real person;
+  each clinician's list is a `patient_links` row carrying
+  their own list status; `GET /patients` returns my list,
+  admins can ask for the registry. (2) **Registry duplicate
+  rules** — an exact match is a hard block ("Already in our
+  database" → Add to my list), near matches prompt, and a
+  confirmed create is remembered as a Known Non-Duplicate
+  (Epic) so the same intake never prompts twice. (3)
+  **Episodes are the unit of sharing** — one active episode
+  per patient across the whole platform (database-enforced),
+  held by one agency, worked by a team (one primary +
+  members, optional supervised-by); same-agency handoffs
+  change members, cross-agency moves need a discharge;
+  same-agency recertification closes + reopens with the team
+  copied. Two ideas adopted from the research synthesis:
+  **coverage visits** (HCHB — a same-agency colleague may take
+  a single visit without joining the team; a ±7-day visit
+  window grants chart access) and **Known Non-Duplicates**
+  (Epic). (4) **Booking gate + calendars** — patient visits
+  require an active episode and a team (or coverage) provider
+  and are stamped with the episode; the calendar defaults to
+  personal, the patient's chart carries the master schedule
+  (all providers named), managers get a practice-wide scope.
+  (5) **Invite-only sign-up** — admins invite by email + role;
+  acceptance (the one route open without a staff record)
+  provisions the account into a blank workspace; the staff-
+  record gate replaces the `ALLOWED_EMAILS` allowlist as the
+  API perimeter. (6) **Migration** (`migrate-platform.sql`)
+  seeds links, episodes, and memberships from the existing
+  data (Jake's 38 patients link to him; episodes derive from
+  each patient's agency + appointment history) — verified on
+  a scratch fixture. API: new `schema-platform.sql`,
+  `lib/platform.js`, `routes/episodes.js`,
+  `routes/invites.js`; reworked auth/patients/appointments/
+  users; new suite `e2e-platform-test.js` (**65 checks, all
+  pass**) and the full legacy battery re-run green (the four
+  suites whose fixtures touched patients/users gained
+  platform fixtures + teardowns). Dashboard: `/accept-
+  invite` page + login "Have an invite?" link; Add Patient
+  server-dedupe panels; CSV import outcome mapping (created /
+  linked / possible-match); profile list actions moved to the
+  link endpoints + Remove from my list; **Episode of care
+  card** with team management + patient master schedule;
+  calendar provider picker scoped to colleagues then narrowed
+  to the episode team, gate errors in plain language, manager
+  My/All scope toggle; Settings gains **My agencies** and
+  **Invites** cards. Dashboard builds clean (bundle
+  `index-C0_aKreK.js`). Deliberately NOT taken: OpenEMR's
+  permissive create-anyway, Epic's two-level episode, HCHB's
+  per-agency silos. Named v2 ideas: duplicate-review
+  workqueue, position-routed workflow queues, external
+  providers on teams.
+- **Platform addendum — episode holds, discharge reasons,
+  case manager — LIVE as deploy-35, 2026-11-03 (same build
+  round).** From Jake's follow-up questions the same
+  day, folded in before the first deploy so the live
+  migration carries the complete episode model. (1) **Holds:**
+  an episode can be put ON HOLD (hospitalized / patient
+  request / physician order / other, each hold an
+  `episode_holds` row with dates so pause time is
+  accountable); a held episode still owns the patient — the
+  one-live-episode index now covers active + on_hold — but
+  booking refuses (409 `EPISODE_ON_HOLD`) EXCEPT a single
+  Resumption of Care visit, whose booking ends the hold in
+  the same transaction (the ROC is the first visit back).
+  Discharge works straight from a hold; recertify requires
+  an active episode. (2) **Discharge reasons:** discharge
+  now records WHY (completed / patient_declined /
+  transferred_agency / transferred_inpatient /
+  moved_out_of_area / physician_order / deceased / other) —
+  the "patient couldn't finish" accounting; shown in the
+  episode history. (3) **Case manager** (HCHB's
+  episode-header role): one team member named on the
+  episode, defaults to the primary, transferable mid-episode
+  (`PUT /episodes/:id/case-manager`); the case manager holds
+  full management rights — the nurse running a case can hold,
+  discharge, or hand the case to another clinician herself —
+  and cannot be removed from the team until a successor is
+  named. API: schema-platform + episodes/appointments/
+  platform-lib changes, migration sets case manager =
+  primary; suite grew to **86 checks, all pass**, full legacy
+  battery + news suite re-run green. Dashboard: EpisodeCard
+  gains the hold banner + Resume, hold panel, discharge
+  reason pick, case-manager line/badge/actions; CalendarView
+  shows the on-hold booking note and maps `EPISODE_ON_HOLD`.
+  Two latent client bugs fixed in the same round: the
+  discharge client now sends `discharge_note` (it sent
+  `note`, which the API ignored) and the EPISODE_ACTIVE
+  message reads the holder from the body's `episode` field.
+  Dashboard builds clean (bundle `index-BXe61b_P.js`).
+- **Solo mode — LIVE as deploy-35, 2026-11-03 (same round).**
+  Jake asked whether a user can run the platform
+  as plain practice management — own list + calendar, no other
+  disciplines, no agency, no episodes. As built, the booking
+  gate said no (an episode, hence an agency, was required).
+  DECIDED + built: **episodes are the unit of sharing, not a
+  toll booth for booking.** With no live episode, booking
+  (single or series) succeeds and the visit is stored
+  unstamped — a personal practice visit; the team/coverage/
+  hold rules engage only once an episode exists, and a
+  personal visit never creates an episode or blocks an agency
+  admission. `NO_ACTIVE_EPISODE` retired. Platform suite →
+  **90 checks, all pass** (solo single + series, gate
+  engagement once an episode starts); full legacy battery
+  green. Dashboard: booking form's no-episode note rewritten
+  (personal visit, not a block), Episode card explains an
+  episode is optional for solo work. Builds clean (bundle
+  `index-V2M5WcnY.js`).
+- **Deploy-35 — the platform goes LIVE (2026-11-03).** API:
+  all 11 files uploaded via GCP console SSH with byte-size
+  verification (code backups `.bak-2026-11-03-deploy35`; DB
+  backup `caretask-20261103-174227.dump` taken first);
+  `schema-platform.sql` applied clean (7 new tables);
+  `migrate-platform.sql` run — with one catch found by the
+  counts: Jake's admin row (jakemarc@gmail.com) was INACTIVE,
+  so the first run linked only 8 patients. The row was
+  activated and the migration re-run (idempotent, as
+  designed): **136 links, 4 episodes, 4 members, 5 agency
+  memberships, 2 appointments stamped**. Live patient count
+  is 128 (119 of them created 2026-11-02 — repeated contacts
+  imports during testing, pre-dedupe; the registry rules now
+  prevent new duplicates, and the merge tool can clean the
+  existing ones). Service restarted, `/health` ok, 401
+  unauthenticated. Dashboard: canonical deployment
+  `7525e40a`, bundle `index-D9AQpxmV.js`, build stamp in
+  `/version.json`. **Cache fix (Jake's request, same
+  deploy):** `public/_headers` — the HTML shell and
+  version.json are served never-cache (verified live:
+  `Cache-Control: no-cache, must-revalidate` on the main
+  domain), hashed assets immutable; `src/main.tsx` compares
+  the running build stamp against `/version.json` on load
+  and reloads once when stale, so a phone holding an old
+  cached copy heals itself instead of showing "API
+  disconnected". Jake's signed-in check is the remaining
+  verification (plus his deploy-33/34 checks).
+
 ## 2026-11-02
 
 - **Add Patient form + intake + entry round — Live

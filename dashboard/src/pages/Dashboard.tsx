@@ -94,6 +94,8 @@ import AgencyView from "../components/AgencyView";
 import AgencyPicker from "../components/AgencyPicker";
 import AgencyDirectorySettings from "../components/AgencyDirectorySettings";
 import CsvImport from "../components/CsvImport";
+import { InvitesCard, MyAgenciesCard } from "../components/PlatformSettings";
+import EpisodeCard from "../components/EpisodeCard";
 import type { ContactCandidate } from "../lib/googleContacts";
 import {
   ageBandFromDob,
@@ -102,6 +104,8 @@ import {
   createStaff,
   deactivateStaff,
   deletePatient,
+  linkPatient,
+  listClinicians,
   markDuplicatePair,
   getPatient,
   isApiConfigured,
@@ -114,14 +118,18 @@ import {
   reportEvent,
   restoreStaff,
   searchPatients,
+  setLinkStatus,
   STAFF_CREDENTIALS,
   STAFF_POSITIONS,
   STAFF_ROLES,
+  unlinkPatient,
   updatePatient,
   updateStaff,
   verifyChain,
   type ApiEvent,
+  type ApiRequestError,
   type ApiUser,
+  type NewApiPatient,
   type AuditEventName,
   type ChainVerification,
   type PatientStatus,
@@ -648,6 +656,26 @@ export default function Dashboard({
   }
   const [dupMatches, setDupMatches] = useState<DupMatch[]>([]);
   const [dupChecking, setDupChecking] = useState(false);
+
+  // Server-side registry dedupe (platform, 2026-11-03): on Save
+  // the API hard-blocks an exact match (409 PATIENT_EXISTS) and
+  // prompts on near matches (409 POSSIBLE_MATCH). The form then
+  // stays open with everything typed, and this panel offers the
+  // way through: link the existing record, or confirm the create.
+  interface DupCandidate {
+    id: string;
+    name: string;
+    dob: string | null;
+    city: string | null;
+  }
+  interface DupConflict {
+    kind: "exists" | "possible";
+    payload: NewApiPatient;
+    patient?: DupCandidate & { already_linked: boolean };
+    candidates?: DupCandidate[];
+  }
+  const [dupConflict, setDupConflict] = useState<DupConflict | null>(null);
+  const [dupActionBusy, setDupActionBusy] = useState(false);
   useEffect(() => {
     const fname = formFname.trim().toLowerCase();
     const lname = formLname.trim().toLowerCase();
@@ -768,6 +796,9 @@ export default function Dashboard({
     | { kind: "edit" | "deactivate" | "restore"; member: ApiUser }
     | { kind: "import"; candidates: ContactCandidate[] };
   const [staff, setStaff] = useState<ApiUser[] | null>(null);
+  // Platform-scoped provider list for the calendar (colleagues);
+  // null until loaded — the calendar falls back to the staff rows.
+  const [colleagues, setColleagues] = useState<ApiUser[] | null>(null);
   const [staffNotice, setStaffNotice] = useState("");
   // Which staff card's "Patients" section is expanded (staff id),
   // or null when all are collapsed (Jake, 2026-10-30).
@@ -821,6 +852,18 @@ export default function Dashboard({
       .catch(() => {
         if (!cancelled) setStaff(null);
       });
+    if (tab === "appointment") {
+      // The booking form's Provider picker is platform-scoped
+      // (2026-11-03): agency colleagues + me, from
+      // GET /users/clinicians — not the whole staff directory.
+      listClinicians(user)
+        .then((rows) => {
+          if (!cancelled) setColleagues(rows);
+        })
+        .catch(() => {
+          if (!cancelled) setColleagues(null);
+        });
+    }
     if (tab === "clinician") {
       // Keep the Messages nav badge roughly current.
       listMessages(user, { unread: true })
@@ -1231,21 +1274,26 @@ export default function Dashboard({
     setDupPickerOpen(false);
     setDupNote("");
     setStatusError("");
+    setConfirmingUnlink(false);
+    setUnlinkError("");
     setSelectedId(target.id);
   }
 
   // Clinician list management: move a patient off (or back onto)
-  // the active list by STATUS — no delete, no gate. Connected
-  // mode writes through the API; demo mode updates local state.
+  // MY list by STATUS — no delete, no gate. Platform (2026-11-03):
+  // list status lives on the caller's patient_link, not the shared
+  // registry record, so my "discharged" never touches a colleague's
+  // list. Connected mode writes the link; demo mode updates local
+  // state.
   async function handleSetPatientStatus(status: PatientStatus) {
     const id = selectedPerson.id;
     setStatusSaving(true);
     setStatusError("");
     try {
       if (apiStatus === "connected") {
-        const updated = await updatePatient(user, id, { status });
+        await setLinkStatus(user, id, status);
         setPeople((prev) =>
-          prev.map((p) => (p.id === updated.id ? updated : p)),
+          prev.map((p) => (p.id === id ? { ...p, patientStatus: status } : p)),
         );
       } else {
         setPeople((prev) =>
@@ -1260,6 +1308,27 @@ export default function Dashboard({
       );
     } finally {
       setStatusSaving(false);
+    }
+  }
+
+  // Remove the patient from MY list entirely (platform): the
+  // registry record, its episodes, and its history stay — I just
+  // stop seeing it (unless an episode team or a coverage visit
+  // still connects me). Two-step confirm, like Delete.
+  const [confirmingUnlink, setConfirmingUnlink] = useState(false);
+  const [unlinkError, setUnlinkError] = useState("");
+  async function handleRemoveFromList() {
+    const id = selectedPerson.id;
+    setUnlinkError("");
+    try {
+      await unlinkPatient(user, id);
+      setPeople((prev) => prev.filter((p) => p.id !== id));
+      setConfirmingUnlink(false);
+      setTab("list");
+    } catch {
+      setUnlinkError(
+        "Couldn't remove this patient from your list — try again.",
+      );
     }
   }
   // Audit Log view state. Filters persist while the dashboard is
@@ -1513,6 +1582,7 @@ export default function Dashboard({
     // birthday/gender) — no validation for them here or in the
     // API anymore.
     setAddFormError(null);
+    setDupConflict(null);
     const blankToNull = (s: string): string | null => {
       const t = s.trim();
       return t ? t : null;
@@ -1595,8 +1665,7 @@ export default function Dashboard({
         formAgencyId !== null ? null : blankToNull(formAgencyText),
     };
     if (isApiConfigured()) {
-      try {
-        const person = await createPatient(user, {
+      const payload: NewApiPatient = {
           title: blankToNull(formTitle),
           fname,
           mname: blankToNull(formMname),
@@ -1641,11 +1710,35 @@ export default function Dashboard({
           agency_id: formAgencyId,
           agency_name_text:
             formAgencyId !== null ? null : blankToNull(formAgencyText),
-        });
+      };
+      try {
+        const person = await createPatient(user, payload);
         setPeople((prev) => [...prev, person]);
         setSelectedId(person.id);
         setApiStatus("connected");
-      } catch {
+      } catch (err) {
+        // Platform dedupe: an exact registry match is a hard
+        // block and a near match needs a decision — either way the
+        // form STAYS OPEN with everything typed, and the conflict
+        // panel (under the name fields) offers the way through.
+        // Only other failures take the session-only fallback.
+        const apiErr = err as ApiRequestError | null;
+        const body = apiErr?.body as {
+          patient?: DupConflict["patient"];
+          candidates?: DupCandidate[];
+        } | null;
+        if (apiErr?.code === "PATIENT_EXISTS" && body?.patient) {
+          setDupConflict({ kind: "exists", payload, patient: body.patient });
+          return;
+        }
+        if (apiErr?.code === "POSSIBLE_MATCH" && body?.candidates) {
+          setDupConflict({
+            kind: "possible",
+            payload,
+            candidates: body.candidates,
+          });
+          return;
+        }
         setPeople((prev) => [...prev, localPerson]);
         setSelectedId(localPerson.id);
         setApiStatus("fallback");
@@ -1658,7 +1751,60 @@ export default function Dashboard({
     setTab("profile");
   }
 
+  // Duplicate-conflict resolution: link the registry record the
+  // API found instead of creating a second one. The patient opens
+  // on their profile, exactly as if they'd just been added.
+  async function handleLinkExisting(patientId: string) {
+    setDupActionBusy(true);
+    setAddFormError(null);
+    try {
+      await linkPatient(user, patientId);
+      const person = await getPatient(user, patientId);
+      setPeople((prev) =>
+        prev.some((p) => p.id === person.id)
+          ? prev.map((p) => (p.id === person.id ? person : p))
+          : [...prev, person],
+      );
+      setSelectedId(person.id);
+      setDupConflict(null);
+      resetAddForm();
+      setTab("profile");
+    } catch {
+      setAddFormError(
+        "Couldn't add that patient to your list — check the connection and try again.",
+      );
+    } finally {
+      setDupActionBusy(false);
+    }
+  }
+
+  // Duplicate-conflict resolution: the user reviewed the possible
+  // matches and says this is a different person. confirm_create
+  // is recorded server-side as a known non-duplicate.
+  async function handleCreateAnyway() {
+    if (!dupConflict) return;
+    setDupActionBusy(true);
+    setAddFormError(null);
+    try {
+      const person = await createPatient(user, {
+        ...dupConflict.payload,
+        confirm_create: true,
+      });
+      setPeople((prev) => [...prev, person]);
+      setSelectedId(person.id);
+      setApiStatus("connected");
+      setDupConflict(null);
+      resetAddForm();
+      setTab("profile");
+    } catch {
+      setAddFormError("Couldn't save the patient — try again.");
+    } finally {
+      setDupActionBusy(false);
+    }
+  }
+
   function resetAddForm() {
+    setDupConflict(null);
     setFormTitle("");
     setFormFname("");
     setFormMname("");
@@ -3534,8 +3680,43 @@ export default function Dashboard({
                       Return to active
                     </button>
                   )}
+                  {apiStatus === "connected" &&
+                    (!confirmingUnlink ? (
+                      <button
+                        className="btn btn-secondary"
+                        type="button"
+                        onClick={() => setConfirmingUnlink(true)}
+                      >
+                        Remove from my list
+                      </button>
+                    ) : (
+                      <>
+                        <button
+                          className="btn btn-primary"
+                          type="button"
+                          onClick={() => void handleRemoveFromList()}
+                        >
+                          Confirm remove
+                        </button>
+                        <button
+                          className="btn btn-secondary"
+                          type="button"
+                          onClick={() => setConfirmingUnlink(false)}
+                        >
+                          Keep
+                        </button>
+                      </>
+                    ))}
                 </div>
                 {statusError && <p className="pin-error">{statusError}</p>}
+                {unlinkError && <p className="pin-error">{unlinkError}</p>}
+                {apiStatus === "connected" && (
+                  <p className="section-note">
+                    Hold, Discharge, and Remove apply to your list only —
+                    the shared record and your colleagues' lists are
+                    untouched.
+                  </p>
+                )}
                 {apiStatus === "connected" && (
                   <div className="dup-mark">
                     {!dupPickerOpen ? (
@@ -3658,6 +3839,13 @@ export default function Dashboard({
                   patientApiId={selectedPerson.id}
                 />
               )}
+              {apiStatus === "connected" && (
+                <EpisodeCard
+                  key={`episode-${selectedPerson.id}`}
+                  user={user}
+                  patientId={selectedPerson.id}
+                />
+              )}
             </section>
           )}
 
@@ -3758,6 +3946,98 @@ export default function Dashboard({
                             </li>
                           ))}
                         </ul>
+                      </>
+                    )}
+                  </div>
+                )}
+                {dupConflict && (
+                  <div className="dup-panel" role="alert">
+                    {dupConflict.kind === "exists" &&
+                    dupConflict.patient ? (
+                      <>
+                        <p>
+                          <strong>Already in our database</strong>
+                        </p>
+                        <p>
+                          {dupConflict.patient.name} —{" "}
+                          {shortDob(dupConflict.patient.dob)}
+                          {dupConflict.patient.city
+                            ? ` · ${dupConflict.patient.city}`
+                            : ""}{" "}
+                          is already registered, so a second record
+                          can't be created. Add the existing patient
+                          to your list instead.
+                        </p>
+                        <div className="flag-actions">
+                          <button
+                            type="button"
+                            className="btn btn-primary"
+                            disabled={dupActionBusy}
+                            onClick={() =>
+                              void handleLinkExisting(
+                                dupConflict.patient!.id,
+                              )
+                            }
+                          >
+                            {dupConflict.patient.already_linked
+                              ? "Open patient"
+                              : "Add to my list"}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            disabled={dupActionBusy}
+                            onClick={() => setDupConflict(null)}
+                          >
+                            Keep editing
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <p>
+                          <strong>
+                            Possible match — is this the same person?
+                          </strong>
+                        </p>
+                        <ul>
+                          {(dupConflict.candidates ?? []).map((c) => (
+                            <li key={c.id}>
+                              <span>
+                                {c.name} — {shortDob(c.dob)}
+                                {c.city ? ` · ${c.city}` : ""}
+                              </span>
+                              <button
+                                type="button"
+                                className="dup-open"
+                                disabled={dupActionBusy}
+                                onClick={() =>
+                                  void handleLinkExisting(c.id)
+                                }
+                              >
+                                ADD THIS ONE INSTEAD
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                        <div className="flag-actions">
+                          <button
+                            type="button"
+                            className="btn btn-primary"
+                            disabled={dupActionBusy}
+                            onClick={() => void handleCreateAnyway()}
+                          >
+                            No — create a new patient
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            disabled={dupActionBusy}
+                            onClick={() => setDupConflict(null)}
+                          >
+                            Keep editing
+                          </button>
+                        </div>
                       </>
                     )}
                   </div>
@@ -4094,7 +4374,7 @@ export default function Dashboard({
               user={user}
               apiConnected={apiStatus === "connected"}
               patients={people.map(toMapPatient)}
-              clinicians={(staff ?? [])
+              clinicians={(colleagues ?? staff ?? [])
                 .filter((s) => s.active && s.authorized)
                 .map((s) => ({
                   id: String(s.id),
@@ -4412,6 +4692,14 @@ export default function Dashboard({
                   user={user}
                   apiConnected={apiStatus === "connected"}
                 />
+                <MyAgenciesCard
+                  user={user}
+                  apiConnected={apiStatus === "connected"}
+                />
+                <InvitesCard
+                  user={user}
+                  apiConnected={apiStatus === "connected"}
+                />
                 <CsvImport
                   user={user}
                   apiConnected={apiStatus === "connected"}
@@ -4491,7 +4779,8 @@ export default function Dashboard({
                   </div>
                   <p>
                     Sign-in for clinicians (email/password and Google). New
-                    accounts are created by an admin in the Firebase console.
+                    accounts join by invite only — an admin sends one from
+                    Settings.
                   </p>
                 </article>
                 <article className="card">

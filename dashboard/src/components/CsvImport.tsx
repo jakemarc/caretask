@@ -34,10 +34,13 @@ import {
   createPatient,
   createStaff,
   fetchAgencies,
+  getPatient,
   isRoleRejection,
+  linkPatient,
   listPatients,
   listUsers,
   type ApiAgency,
+  type ApiRequestError,
   type ApiUser,
   type NewApiPatient,
   type PatientStatus,
@@ -76,6 +79,9 @@ interface PreviewRow {
 
 interface ImportSummary {
   imported: number;
+  // Patients flow only: rows the registry already held, linked to
+  // the caller's list instead of re-created (platform dedupe).
+  linked: number;
   skipped: number;
   failed: number;
   failures: { name: string; reason: string }[];
@@ -403,6 +409,7 @@ export default function CsvImport({
     if (!flow || flow !== "patients" || selectedRows.length === 0) return;
     setSaving(true);
     const created: PersonUnderCare[] = [];
+    let linked = 0;
     const failures: { name: string; reason: string }[] = [];
     const results = new Map<string, string>();
     for (const row of selectedRows) {
@@ -414,12 +421,43 @@ export default function CsvImport({
         created.push(person);
         results.set(row.key, "Imported");
       } catch (err) {
-        const e = err as { code?: string; message?: string } | null;
-        failures.push({
-          name: row.contact.candidate.displayName,
-          reason: e?.code ?? e?.message ?? "Save failed",
-        });
-        results.set(row.key, "Failed");
+        const e = err as ApiRequestError | null;
+        // Platform registry dedupe (2026-11-03): the server checks
+        // the whole registry, not just my list, so rows my preview
+        // couldn't flag land here. An exact match links instead of
+        // failing; a possible match is left for a human decision in
+        // the Add Patient form — never auto-created from a batch.
+        if (e?.code === "PATIENT_EXISTS") {
+          const body = e.body as {
+            patient?: { id: string };
+          } | null;
+          try {
+            if (!body?.patient?.id) throw new Error("no patient id");
+            await linkPatient(user, body.patient.id);
+            created.push(await getPatient(user, body.patient.id));
+            linked += 1;
+            results.set(row.key, "Added to my list");
+          } catch {
+            failures.push({
+              name: row.contact.candidate.displayName,
+              reason: "Already in the registry, but linking failed",
+            });
+            results.set(row.key, "Failed");
+          }
+        } else if (e?.code === "POSSIBLE_MATCH") {
+          failures.push({
+            name: row.contact.candidate.displayName,
+            reason:
+              "Possible match in the registry — review it from the Add Patient form",
+          });
+          results.set(row.key, "Possible match");
+        } else {
+          failures.push({
+            name: row.contact.candidate.displayName,
+            reason: e?.code ?? e?.message ?? "Save failed",
+          });
+          results.set(row.key, "Failed");
+        }
       }
     }
     setRows((prev) =>
@@ -431,9 +469,11 @@ export default function CsvImport({
     );
     if (created.length > 0) onPatientsImported?.(created);
     setSummary({
-      imported: created.length,
+      imported: created.length - linked,
+      linked,
       failed: failures.length,
-      skipped: (rows ?? []).length - created.length - failures.length,
+      skipped:
+        (rows ?? []).length - created.length - failures.length,
       failures,
     });
     setSaving(false);
@@ -484,6 +524,7 @@ export default function CsvImport({
     );
     setSummary({
       imported,
+      linked: 0,
       failed,
       skipped: (rows ?? []).length - imported - failed,
       failures,
@@ -803,8 +844,10 @@ export default function CsvImport({
           {summary && (
             <div className="csv-summary">
               <p>
-                Imported {summary.imported} · Skipped {summary.skipped} ·
-                Failed {summary.failed}
+                Imported {summary.imported}
+                {summary.linked > 0 &&
+                  ` · Added to my list ${summary.linked}`}{" "}
+                · Skipped {summary.skipped} · Failed {summary.failed}
               </p>
               {summary.failures.length > 0 && (
                 <ul className="csv-failures">

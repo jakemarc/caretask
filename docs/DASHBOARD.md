@@ -778,6 +778,77 @@ dashboard-only. Staff import is unchanged.
   provider or the status pill; the Patients-page
   `.add-patient-btn` loses its + icon at ≥721px.
 
+## Multi-user platform UI (Live — deploy-35, 2026-11-03)
+
+The dashboard half of the platform (API side: API.md →
+"Multi-user platform"). All of it is inert until the platform
+API deploys — the views key off `apiStatus === "connected"`
+exactly like the other API panels.
+
+- **Invite acceptance** (`src/pages/AcceptInvite.tsx`, route
+  `/accept-invite?code=…`, linked from the login page's "Have
+  an invite?" line): the code field is prefilled from the link;
+  a new user creates their Firebase account here (or signs in
+  with an existing one / Google), and the page calls
+  `POST /invites/accept` BEFORE entering the app, so the staff
+  record exists by the time the dashboard loads. API error
+  codes map to plain sentences (expired / used / wrong email).
+  There is still NO public registration form anywhere.
+- **Add Patient — server dedupe panels:** the client-side
+  same-name warning under the name fields stays, but Save now
+  answers to the registry: a 409 `PATIENT_EXISTS` keeps the
+  form open and shows "Already in our database" with **Add to
+  my list** (link → open the profile); a 409 `POSSIBLE_MATCH`
+  lists the candidates with **Add this one instead** per
+  candidate plus **No — create a new patient**
+  (`confirm_create`). Only non-dedupe failures take the old
+  session-only fallback. CSV import maps the same outcomes per
+  row: exact → linked ("Added to my list"), possible → left
+  un-imported with a review note, never auto-created.
+- **Profile — my list vs the record:** Put on hold / Discharge /
+  Return to active now write the caller's LINK
+  (`PUT /patients/:id/link`), not the shared record, and a
+  two-step **Remove from my list** sits beside them. A note
+  under the buttons says these apply to your list only.
+- **Episode of care card** (`src/components/EpisodeCard.tsx`,
+  profile, under Clinical Documents): the live episode
+  (agency, primary, **case manager**, admitted date), its team
+  with roles and supervised-by, add/remove member,
+  make-primary and **make case manager** (shown to the primary,
+  the case manager, and managers/admins; the API enforces),
+  Discharge (required **reason** pick + date + optional note)
+  and Recertify confirm panels, a Start episode picker over MY
+  agencies when none is live (with the holding agency named
+  when the API refuses), episode history (with discharge
+  reasons), and the **patient schedule** — the master calendar:
+  `GET /appointments?patient_id=` past + upcoming with provider
+  names. **Holds (addendum 2026-11-03):** a held episode shows
+  an "On hold" badge and a banner (reason label, since when,
+  note, Resume button); Put on hold opens a reason + note
+  panel; Recertify hides while held (the API refuses it too).
+- **Calendar:** the Provider picker is fed by
+  `GET /users/clinicians` (agency colleagues + me), loaded by
+  the Dashboard alongside the staff directory; in the booking
+  form it narrows to the picked patient's episode team (the
+  current value always stays listed). The form shows a note
+  when the patient has no episode (the visit will be a
+  personal one — solo mode, 2026-11-03), and — for a held
+  episode — a note that only a Resumption of Care can be
+  booked (booking it ends the hold). Save errors map
+  the gate codes (`EPISODE_ON_HOLD`,
+  `NOT_ON_TEAM`) to plain
+  instructions. Managers/admins get a **My calendar / All
+  clinicians** scope select in `.cal-filterbar` (default stays
+  personal). Personal-scope purity is the API default — no
+  client change was needed for it.
+- **Settings cards** (`src/components/PlatformSettings.tsx`):
+  **My agencies** (everyone): my memberships with Remove
+  (the `PRIMARY_ON_ACTIVE_EPISODE` refusal is explained), plus
+  directory search + Add. **Invites** (platform admins only —
+  other roles never render it): create by email + role, the
+  acceptance link is shown ONCE with a Copy button (the raw
+  code is never stored), list with derived status + Revoke.
+
 ## Calendar chrome (Live 2026-11-03, deploy-33)
 
 - The view toggle buttons carry line icons next to their

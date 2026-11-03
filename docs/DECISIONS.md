@@ -95,3 +95,81 @@ kept); appointment rows get their own Edit pencil because
 the detail card's Edit button sat below the list where he
 never saw it; and the booking page must scroll to the top
 when it opens.
+
+## Multi-user platform (2026-11-03, built — deploy pending Jake's go)
+
+Jake's design, given across one session: every user gets a
+blank workspace; sign-up is **invite-only** (Jake overrode the
+open-sign-up recommendation); patient data entered by anyone
+becomes part of a **master registry** ("their data becomes our
+data") — an exact duplicate is blocked with "Already in our
+database" + Add-to-my-list, a near match prompts "Possible
+match — is this the same person?"; each user's list and list
+status are personal. Sharing is by **episode**: one active
+episode per patient across the whole platform (patient +
+agency + primary + team); same-agency sharing happens by
+assignment (a PT assigns to a PTA) without discharge; another
+agency requires a discharge first, and the blocked user sees
+WHICH agency holds the episode; discharge takes a date +
+optional note and closes into history; same-agency
+recertification is one tap. Two calendars: personal (default)
+and a patient-centric master calendar on the chart. An
+episode table was needed; an encounter table was NOT (the
+appointment is the visit, the document is the note) —
+vocabulary is episode/visit, not encounter.
+
+Research synthesis (Jake: "can we combine the advantages of
+each system to create a superior system", after Epic + HCHB +
+OpenEMR model comparisons): ADOPTED into the build —
+**coverage visits** (HCHB: a same-agency colleague may take a
+single visit without joining the team; chart access rides on
+the visit within ±7 days) and **Known Non-Duplicates** (Epic:
+a reviewed-and-confirmed near match never prompts again for
+the same intake data; exact matches never suppressed).
+DELIBERATELY LEFT BEHIND — OpenEMR's permissive create-anyway
+(Jake's hard block stands), Epic's two-level episode (HCHB's
+flat certification-period model wins), Epic's security-class
+complexity, HCHB's per-agency silos. Uniquely ours:
+cross-agency master registry + one-active-episode lock across
+organizations, invite-only multi-agency network, and the
+exact-undo merge (deploy-28) that beats both OpenEMR's
+non-recoverable merge and Epic's caveated unmerge.
+
+Consequences recorded: the API perimeter moves from the
+`ALLOWED_EMAILS` allowlist to the **staff-record gate +
+invites** (the allowlist env var becomes vestigial at
+deploy); Jake's current patients seed the registry, all
+linked to him, via `migrate-platform.sql` (reviewed before
+it runs live). Built + verified locally 2026-11-03 (API
+65-check platform suite + full legacy battery green;
+dashboard builds clean). Deploy (branch-first, API then
+dashboard) awaits Jake's explicit go.
+
+Addendum (same day, Jake's follow-ups, built into the same
+local round BEFORE deploy): **episode holds** (a hospitalized
+patient's episode goes on hold — still owns the patient, booking
+paused, a Resumption of Care booking ends the hold) and
+**structured discharge reasons** (so a patient who can't finish
+an episode still closes with the why on record) were presented
+as a design; Jake then approved **case manager** explicitly
+("Add case manager to the build"), and the hold/reason work was
+folded into that same build round as the foundation it builds
+on (stated to Jake in the delivery report; his veto can split
+them back out before deploy). Case manager (HCHB's model): a
+distinct role from the primary — one team member who runs the
+case clinically, defaults to the primary, is transferable
+mid-episode, holds full management rights (hold/discharge/
+recertify/team), and cannot be removed from the team until a
+successor is named. Verified: platform suite 86 checks (21
+new), full legacy battery green, dashboard builds clean.
+
+Solo mode (same day, Jake's question + approval "Make solo
+mode work"): the platform must serve a clinician who only
+wants a patient list + calendar as practice management — no
+other disciplines, no agency, no episodes. DECIDED: episodes
+are the unit of SHARING, not a prerequisite for booking. No
+live episode → booking works, visit stored unstamped
+(personal); the gate's rules engage only once an episode
+exists; a personal visit never creates an episode or blocks
+an agency admission. Verified: platform suite 90 checks,
+full battery green, dashboard builds clean.

@@ -37,6 +37,14 @@ const pool = require('../db');
 const { insertEvent } = require('../lib/eventLog');
 const { requireRole, attachManager } = require('../lib/requireRole');
 const requireManagerRole = requireRole('manager', 'admin');
+const {
+  resolveStaff,
+  isPlatformAdmin,
+  hasChartAccess,
+  liveEpisode,
+  isCurrentMember,
+  isAgencyMember,
+} = require('../lib/platform');
 
 const router = express.Router();
 
@@ -61,7 +69,7 @@ const SELECT = `
          a.category_id, c.name AS category_name, c.color AS category_color,
          c.cattype, c.default_duration_min,
          a.title, a.starts_at, a.ends_at, a.status, a.room, a.notes,
-         a.series_id,
+         a.series_id, a.episode_id,
          a.created_at, a.updated_at, a.deleted_at
     FROM appointments a
     LEFT JOIN patients p ON p.id = a.patient_id
@@ -133,6 +141,110 @@ async function checkRefs(db, v) {
   }
   if (new Date(v.ends_at) <= new Date(v.starts_at)) {
     throw httpError(400, 'ends_at must be after starts_at', 'VALIDATION');
+  }
+}
+
+// Platform booking gate (spec §5): WHEN the patient has a live
+// episode, a visit lives inside it and takes that episode_id; its
+// provider must be a current member of the episode's team.
+// COVERAGE (HCHB's rule, adopted 2026-11-03): a colleague who
+// works for the episode's agency may take a SINGLE visit without
+// joining the team — planned care (a series) stays team-only. An
+// unassigned visit (provider_id null) may only be booked by a
+// team member (or a platform admin) — it gets assigned later.
+// Visits with no patient (provider schedule blocks) skip the gate
+// entirely.
+//
+// SOLO MODE (Jake, 2026-11-03): when the patient has NO live
+// episode, booking simply works and the visit stays unstamped
+// (episode_id NULL) — a personal practice visit. Episodes are
+// the unit of SHARING, not a toll booth for booking: a solo
+// clinician with their own list + calendar never has to touch
+// agencies, teams, or episodes. The gate's team rules engage
+// only once an episode actually exists. A personal visit never
+// creates an episode, so it never blocks an agency admission.
+// Throws httpError 409 EPISODE_ON_HOLD / 403 NOT_ON_TEAM.
+async function applyEpisodeGate(db, req, values, { series = false } = {}) {
+  if (!values.patient_id) {
+    values.episode_id = null;
+    return;
+  }
+  const ep = await liveEpisode(db, values.patient_id);
+  if (!ep) {
+    values.episode_id = null;
+    return;
+  }
+  // On-hold episodes (addendum 2026-11-03): booking is closed
+  // while the patient is held (hospitalized etc.) — EXCEPT a
+  // single Resumption of Care visit, which is clinically the
+  // first visit back: booking it ends the hold (below, once the
+  // team check has passed).
+  let resumeOnBook = false;
+  if (ep.status === 'on_hold') {
+    let isRoc = false;
+    if (!series && values.category_id) {
+      const cat = await db.query(
+        'SELECT name FROM appointment_categories WHERE id = $1',
+        [values.category_id],
+      );
+      isRoc = cat.rows[0]?.name === 'Resumption of Care';
+    }
+    if (!isRoc) {
+      const hold = await db.query(
+        `SELECT reason, started_on FROM episode_holds
+          WHERE episode_id = $1 AND ended_on IS NULL
+          ORDER BY started_on DESC, id DESC LIMIT 1`,
+        [ep.id],
+      );
+      const h = hold.rows[0];
+      throw httpError(
+        409,
+        h
+          ? `this patient's episode is on hold (${h.reason} since ${String(h.started_on).slice(0, 10)}) — resume it, or book a Resumption of Care visit to end the hold`
+          : "this patient's episode is on hold — resume it, or book a Resumption of Care visit to end the hold",
+        'EPISODE_ON_HOLD',
+      );
+    }
+    resumeOnBook = true;
+  }
+  values.episode_id = ep.id;
+  let gateOk = false;
+  if (values.provider_id) {
+    if (await isCurrentMember(db, ep.id, values.provider_id)) {
+      gateOk = true;
+    } else if (!series && (await isAgencyMember(db, values.provider_id, ep.agency_id))) {
+      values.coverage = true;
+      gateOk = true;
+    }
+  } else {
+    const staff = await resolveStaff(req);
+    gateOk =
+      !!staff &&
+      (isPlatformAdmin(staff) || (await isCurrentMember(db, ep.id, staff.id)));
+  }
+  if (!gateOk) {
+    throw httpError(403, 'that provider is not on the episode team', 'NOT_ON_TEAM');
+  }
+  if (resumeOnBook) {
+    // The ROC booking ends the hold in the same transaction as
+    // the visit create (the gate runs inside the POST's tx).
+    const staff = await resolveStaff(req);
+    await db.query(
+      `UPDATE episode_holds SET ended_on = CURRENT_DATE, ended_by = $2
+        WHERE episode_id = $1 AND ended_on IS NULL`,
+      [ep.id, staff?.id ?? null],
+    );
+    await db.query(
+      `UPDATE patient_episodes SET status = 'active', updated_at = now() WHERE id = $1`,
+      [ep.id],
+    );
+    await insertEvent(db, {
+      actor: req.user,
+      event: 'episode_resume',
+      patientId: values.patient_id,
+      details: { episode_id: ep.id, action: 'roc_booking' },
+      ip: req.ip,
+    });
   }
 }
 
@@ -413,6 +525,38 @@ router.get('/', async (req, res, next) => {
       params.push(d.toISOString());
       clauses.push(`a.starts_at < $${params.length}`);
     }
+    // Platform scopes (spec §5). ?patient_id= is the MASTER view —
+    // every visit for one patient, chart access required. ?scope=all
+    // is the coordinator view (manager/admin/developer only). The
+    // default is the PERSONAL scope: my visits, plus unassigned
+    // visits on episodes whose team I belong to.
+    const staff = await resolveStaff(req);
+    if (!staff) {
+      return res.status(403).json({ error: 'no active staff record for this account', code: 'NO_STAFF_RECORD' });
+    }
+    if (req.query.patient_id) {
+      const v = String(req.query.patient_id);
+      if (!UUID_RE.test(v)) {
+        return res.status(400).json({ error: 'patient_id must be a UUID', code: 'VALIDATION' });
+      }
+      if (!(await hasChartAccess(staff, v))) {
+        return res.status(404).json({ error: 'patient not found' });
+      }
+      params.push(v);
+      clauses.push(`a.patient_id = $${params.length}`);
+    } else if (req.query.scope === 'all') {
+      if (!['manager', 'admin', 'developer'].includes(staff.role)) {
+        return res.status(403).json({ error: 'the all-scope calendar is for managers', code: 'SCOPE_FORBIDDEN' });
+      }
+    } else {
+      params.push(staff.id);
+      const me = params.length;
+      clauses.push(
+        `(a.provider_id = $${me} OR (a.provider_id IS NULL AND a.episode_id IN
+           (SELECT episode_id FROM episode_members
+             WHERE user_id = $${me} AND removed_at IS NULL)))`,
+      );
+    }
     for (const [param, col] of [['provider_id', 'a.provider_id']]) {
       if (req.query[param]) {
         const v = Number(req.query[param]);
@@ -422,14 +566,6 @@ router.get('/', async (req, res, next) => {
         params.push(v);
         clauses.push(`${col} = $${params.length}`);
       }
-    }
-    if (req.query.patient_id) {
-      const v = String(req.query.patient_id);
-      if (!UUID_RE.test(v)) {
-        return res.status(400).json({ error: 'patient_id must be a UUID', code: 'VALIDATION' });
-      }
-      params.push(v);
-      clauses.push(`a.patient_id = $${params.length}`);
     }
     const r = await pool.query(
       `${SELECT} WHERE ${clauses.join(' AND ')} ORDER BY a.starts_at ASC`,
@@ -465,9 +601,10 @@ router.post('/', async (req, res, next) => {
       // Provider schedule events never carry a patient (OpenEMR's
       // Patient tab vs Provider tab split).
       if (cat.rows[0].cattype === 'provider') values.patient_id = null;
+      await applyEpisodeGate(client, req, values);
       const r = await client.query(
-        `INSERT INTO appointments (patient_id, provider_id, category_id, title, starts_at, ends_at, status, room, notes)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+        `INSERT INTO appointments (patient_id, provider_id, category_id, title, starts_at, ends_at, status, room, notes, episode_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
         [
           values.patient_id,
           values.provider_id,
@@ -478,6 +615,7 @@ router.post('/', async (req, res, next) => {
           values.status,
           values.room ?? null,
           values.notes ?? null,
+          values.episode_id ?? null,
         ],
       );
       const row = await fetchOne(client, r.rows[0].id);
@@ -538,12 +676,13 @@ router.post('/series', async (req, res, next) => {
         [values.category_id],
       );
       if (cat.rows[0].cattype === 'provider') values.patient_id = null;
+      await applyEpisodeGate(client, req, values, { series: true });
       const rows = [];
       for (const start of starts) {
         const end = new Date(start.getTime() + durationMin * 60000);
         const r = await client.query(
-          `INSERT INTO appointments (patient_id, provider_id, category_id, title, starts_at, ends_at, status, room, notes, series_id)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+          `INSERT INTO appointments (patient_id, provider_id, category_id, title, starts_at, ends_at, status, room, notes, series_id, episode_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
           [
             values.patient_id,
             values.provider_id,
@@ -555,6 +694,7 @@ router.post('/series', async (req, res, next) => {
             values.room ?? null,
             values.notes ?? null,
             seriesId,
+            values.episode_id ?? null,
           ],
         );
         const row = await fetchOne(client, r.rows[0].id);
@@ -619,6 +759,21 @@ router.put('/series/:seriesId', attachManager, async (req, res, next) => {
           starts_at: first.starts_at,
           ends_at: first.ends_at,
         });
+        // Platform gate: a series-wide provider change must keep the
+        // provider on the episode team.
+        if (
+          patch.provider_id !== undefined &&
+          patch.provider_id !== null &&
+          patch.provider_id !== first.provider_id &&
+          first.patient_id
+        ) {
+          const epId =
+            first.episode_id ||
+            (await liveEpisode(client, first.patient_id))?.id;
+          if (epId && !(await isCurrentMember(client, epId, patch.provider_id))) {
+            throw httpError(403, 'that provider is not on the episode team', 'NOT_ON_TEAM');
+          }
+        }
       }
       params.push(seriesId);
       await client.query(
@@ -673,7 +828,39 @@ router.put('/:id', attachManager, async (req, res, next) => {
         ...values,
       };
       await checkRefs(client, merged);
-      const keys = Object.keys(values).filter((k) => [...WRITABLE, 'status'].includes(k));
+      // Platform gate on edits: moving the visit to a different
+      // patient re-runs the booking gate (and re-stamps the
+      // episode); moving it to a different provider requires the
+      // new provider to be on the episode team. A pure reschedule
+      // (times only — the calendar drag) is never gated.
+      if (merged.patient_id) {
+        const patientChanged =
+          values.patient_id !== undefined && values.patient_id !== cur.patient_id;
+        const providerChanged =
+          values.provider_id !== undefined && values.provider_id !== cur.provider_id;
+        if (patientChanged) {
+          await applyEpisodeGate(client, req, merged);
+          values.episode_id = merged.episode_id;
+        } else if (providerChanged && merged.provider_id) {
+          const epRow = cur.episode_id
+            ? (
+                await client.query(
+                  'SELECT id, agency_id FROM patient_episodes WHERE id = $1',
+                  [cur.episode_id],
+                )
+              ).rows[0]
+            : await liveEpisode(client, merged.patient_id);
+          if (epRow && !(await isCurrentMember(client, epRow.id, merged.provider_id))) {
+            // Coverage applies to single-visit reassignments too:
+            // a colleague at the episode's agency may take it.
+            const covered = await isAgencyMember(client, merged.provider_id, epRow.agency_id);
+            if (!covered) {
+              throw httpError(403, 'that provider is not on the episode team', 'NOT_ON_TEAM');
+            }
+          }
+        }
+      }
+      const keys = Object.keys(values).filter((k) => [...WRITABLE, 'status', 'episode_id'].includes(k));
       if (keys.length) {
         const sets = keys.map((k, i) => `${k} = $${i + 2}`).join(', ');
         await client.query(`UPDATE appointments SET ${sets} WHERE id = $1`, [

@@ -282,6 +282,58 @@ Per-clinician reminders (`schema-tasks.sql`): `user_id` owner
 `deleted_at`. Owner-scoped at the API — no other clinician can
 read or address a row.
 
+## Platform tables (Live — deploy-35, 2026-11-03, schema-platform.sql)
+
+The multi-user platform (spec:
+`~/workspace/marc-innotech/multi-user-platform-spec.md`). All
+six tables are new; `appointments` gains one column. The schema
+file is idempotent and runs LAST in the chain (it also widens
+the `event_log` CHECK with the platform event types).
+
+- `user_agencies` — agency memberships: PK (user_id, agency_id),
+  both FKs CASCADE. Self-managed via `/users/me/agencies`.
+- `patient_links` — per-user patient lists: PK (user_id,
+  patient_id), both FKs CASCADE; `list_status` CHECK
+  active/hold/discharged; `removed_at` soft-unlink. The
+  patient's LIST status lives here now, not on the registry row.
+- `patient_episodes` — UUID PK; patient_id (CASCADE), agency_id,
+  primary_user_id, `case_manager_user_id` (FK → users; the
+  clinical coordinator — addendum 2026-11-03), status CHECK
+  active/on_hold/discharged, admitted_at DATE, discharged_at,
+  `discharge_reason` CHECK (completed / patient_declined /
+  transferred_agency / transferred_inpatient /
+  moved_out_of_area / physician_order / deceased / other),
+  discharge_note, `recert_of` self-FK (recertification chain),
+  created_by, deleted_at. **Partial unique index
+  `patient_episodes_one_active_idx` UNIQUE (patient_id) WHERE
+  status IN ('active','on_hold') AND deleted_at IS NULL** —
+  the one-live-episode rule is enforced by the database, not
+  by convention; a held episode still owns the patient.
+- `episode_members` — PK (episode_id, user_id), both FKs
+  CASCADE; member_role CHECK primary/member; `supervised_by`
+  (nullable FK → users, the PTA→PT pointer); added_by;
+  removed_at (leaving the team stops future visibility; past
+  visits stay).
+- `episode_holds` — (addendum 2026-11-03) BIGINT identity PK;
+  episode_id (CASCADE); reason CHECK hospitalized /
+  patient_request / physician_order / other; note; started_on /
+  ended_on DATEs (the open hold has ended_on NULL);
+  started_by / ended_by. One row per hold, so pause time is
+  accountable across multiple holds.
+- `invites` — BIGINT identity PK; email; role CHECK (same set
+  as users.role); `code_hash` TEXT UNIQUE (SHA-256 of the code —
+  the raw code exists only in the create response); invited_by;
+  expires_at (7 days); accepted_by/accepted_at; revoked_at.
+  Status is derived, never stored.
+- `patient_duplicate_dismissals` — Known Non-Duplicates: PK
+  (patient_id, fingerprint) where the fingerprint is a SHA-1 of
+  the normalized intake (first|last|DOB); dismissed_by. A pair
+  stored here suppresses future near-match prompts for that
+  intake; exact matches are never suppressed.
+- `appointments.episode_id` — UUID FK → patient_episodes, ON
+  DELETE SET NULL. Stamped by the booking gate; pre-platform
+  rows keep NULL until the platform migration stamps them.
+
 ## audit_log (patient change history)
 
 id, patient_id, actor_uid, actor_email, action
@@ -298,7 +350,11 @@ sign_out / report_export / auth_failure / admin_action /
 api_request / appointment_change / message_send / message_read /
 document_create / document_update / document_finalize /
 agency_sync / expense_change — the last added by
-`schema-expenses.sql`, local only),
+`schema-expenses.sql`, local only; the platform adds
+patient_link / patient_unlink / episode_create /
+episode_discharge / episode_team / episode_hold / episode_resume /
+episode_case_manager / invite_create / invite_accept /
+agency_membership — Live, deploy-35, 2026-11-03),
 patient_id (nullable, **no FK by design** — events
 about deleted/unknown patients must still record), details JSONB,
 ip, created_at, prev_hash, row_hash. Append-only, same triggers.

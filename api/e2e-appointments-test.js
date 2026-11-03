@@ -65,6 +65,7 @@ let gonePatientId;
 let providerId;
 let followupCatId;
 let lunchCatId;
+let agencyId;
 
 async function setup() {
   await pool.query(
@@ -115,9 +116,45 @@ async function setup() {
     `INSERT INTO patients (fname, lname, deleted_at) VALUES ('Appt', 'Goneperson', now()) RETURNING id`,
   );
   gonePatientId = p2.rows[0].id;
+  // Platform fixture (2026-11-03): patient bookings require an
+  // active episode whose team includes the provider, and the
+  // patient-scoped list requires chart access. Give Testperson an
+  // episode at a test agency; provider is primary, caller a member.
+  const ag = await pool.query(
+    `INSERT INTO agencies (license_number, name) VALUES ('E2E-APPT', 'Appt Test Agency')
+     ON CONFLICT (license_number) DO UPDATE SET name = EXCLUDED.name RETURNING id`,
+  );
+  agencyId = ag.rows[0].id;
+  const tester = await pool.query(
+    `SELECT id FROM users WHERE email = 'tester@example.com'`,
+  );
+  for (const uid of [providerId, tester.rows[0].id]) {
+    await pool.query(
+      `INSERT INTO user_agencies (user_id, agency_id) VALUES ($1, $2)
+       ON CONFLICT DO NOTHING`,
+      [uid, agencyId],
+    );
+  }
+  const ep = await pool.query(
+    `INSERT INTO patient_episodes (patient_id, agency_id, primary_user_id, created_by)
+     VALUES ($1, $2, $3, $3) RETURNING id`,
+    [patientId, agencyId, providerId],
+  );
+  await pool.query(
+    `INSERT INTO episode_members (episode_id, user_id, member_role, added_by)
+     VALUES ($1, $2, 'primary', $2), ($1, $3, 'member', $2)
+     ON CONFLICT DO NOTHING`,
+    [ep.rows[0].id, providerId, tester.rows[0].id],
+  );
 }
 
 async function cleanup() {
+  await pool.query('DELETE FROM episode_members WHERE episode_id IN (SELECT id FROM patient_episodes WHERE patient_id IN ($1, $2))',
+    [patientId, gonePatientId]);
+  await pool.query('DELETE FROM patient_episodes WHERE patient_id IN ($1, $2)',
+    [patientId, gonePatientId]);
+  await pool.query('DELETE FROM user_agencies WHERE agency_id = $1', [agencyId]);
+  await pool.query('DELETE FROM agencies WHERE id = $1', [agencyId]);
   await pool.query('DELETE FROM appointments WHERE patient_id IN ($1, $2) OR provider_id = $3',
     [patientId, gonePatientId, providerId]);
   await pool.query('DELETE FROM appointments WHERE category_id IN ($1, $2)', [followupCatId, lunchCatId]);
@@ -214,10 +251,10 @@ async function main() {
 
     // --- list windows + filters
     r = await call('GET',
-      `/appointments?from=${encodeURIComponent(iso(day(1, 0)))}&to=${encodeURIComponent(iso(day(2, 0)))}`);
+      `/appointments?from=${encodeURIComponent(iso(day(1, 0)))}&to=${encodeURIComponent(iso(day(2, 0)))}&patient_id=${patientId}`);
     let list = (await r.json()).appointments;
     check('list in-window includes it', list.some((a) => a.id === apptId));
-    r = await call('GET', `/appointments?provider_id=${providerId}`);
+    r = await call('GET', `/appointments?provider_id=${providerId}&patient_id=${patientId}`);
     list = (await r.json()).appointments;
     check('list provider filter', list.some((a) => a.id === apptId) && list.every((a) => a.provider_id === providerId));
 

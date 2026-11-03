@@ -28,6 +28,12 @@ const { hashPin, isPinFormat } = require('../lib/pin');
 const { insertEvent } = require('../lib/eventLog');
 const { requireRole, attachManager } = require('../lib/requireRole');
 const requireManagerRole = requireRole('manager', 'admin');
+const {
+  resolveStaff,
+  isPlatformAdmin,
+  isAgencyMember,
+} = require('../lib/platform');
+const { computeDisplayName } = require('./agencies');
 
 const router = express.Router();
 
@@ -66,11 +72,160 @@ router.get('/me', async (req, res, next) => {
 
 router.get('/clinicians', async (req, res, next) => {
   try {
+    // Platform scoping (spec §3): the assignable-provider list is
+    // the caller's AGENCY COLLEAGUES — users sharing at least one
+    // agency membership — plus the caller. Platform admins see
+    // everyone. (Before the platform this returned all authorized
+    // staff; team assignment picks from this list, so it must be
+    // the people the caller can actually work with.)
+    const staff = await resolveStaff(req);
+    if (!staff) {
+      return res.status(403).json({
+        error: 'no active staff record for this account',
+        code: 'NO_STAFF_RECORD',
+      });
+    }
+    if (isPlatformAdmin(staff)) {
+      const { rows } = await pool.query(
+        `SELECT ${SAFE_COLUMNS} FROM users
+          WHERE authorized AND active ORDER BY lname, fname`,
+      );
+      return res.json(rows);
+    }
     const { rows } = await pool.query(
-      `SELECT ${SAFE_COLUMNS} FROM users
-        WHERE authorized AND active ORDER BY lname, fname`,
+      `SELECT ${SAFE_COLUMNS} FROM users u
+        WHERE u.authorized AND u.active AND (
+          u.id = $1 OR EXISTS (
+            SELECT 1 FROM user_agencies mine
+              JOIN user_agencies theirs
+                ON theirs.agency_id = mine.agency_id
+             WHERE mine.user_id = $1 AND theirs.user_id = u.id
+          )
+        ) ORDER BY u.lname, u.fname`,
+      [staff.id],
     );
     res.json(rows);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ------------------------------------------------------------------
+// My agencies (platform spec §3/§8): the agencies I work for.
+// Self-service — any staff member manages their own memberships.
+// ------------------------------------------------------------------
+
+router.get('/me/agencies', async (req, res, next) => {
+  try {
+    const staff = await resolveStaff(req);
+    if (!staff) {
+      return res.status(403).json({
+        error: 'no active staff record for this account',
+        code: 'NO_STAFF_RECORD',
+      });
+    }
+    const { rows } = await pool.query(
+      `SELECT ag.id, ag.name, ag.dba, ag.short_name, ag.city, ag.state
+         FROM user_agencies ua
+         JOIN agencies ag ON ag.id = ua.agency_id
+        WHERE ua.user_id = $1
+        ORDER BY ag.name`,
+      [staff.id],
+    );
+    res.json({
+      agencies: rows.map((r) => ({
+        id: r.id,
+        name: r.name,
+        display_name: computeDisplayName(r),
+        city: r.city,
+        state: r.state,
+      })),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/me/agencies', async (req, res, next) => {
+  try {
+    const staff = await resolveStaff(req);
+    if (!staff) {
+      return res.status(403).json({
+        error: 'no active staff record for this account',
+        code: 'NO_STAFF_RECORD',
+      });
+    }
+    const agencyId = Number(req.body?.agency_id);
+    if (!Number.isInteger(agencyId) || agencyId <= 0) {
+      return res.status(400).json({ error: 'agency_id is required', code: 'VALIDATION' });
+    }
+    const agency = await pool.query('SELECT id FROM agencies WHERE id = $1', [agencyId]);
+    if (!agency.rows[0]) {
+      return res.status(400).json({
+        error: 'agency_id does not match an existing agency',
+        code: 'AGENCY_NOT_FOUND',
+      });
+    }
+    await pool.query(
+      `INSERT INTO user_agencies (user_id, agency_id) VALUES ($1, $2)
+       ON CONFLICT (user_id, agency_id) DO NOTHING`,
+      [staff.id, agencyId],
+    );
+    insertEvent(pool, {
+      actor: req.user,
+      event: 'agency_membership',
+      details: { action: 'add', agency_id: agencyId },
+      ip: req.ip || null,
+    }).catch(() => {});
+    res.status(201).json({ added: true, agency_id: agencyId });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete('/me/agencies/:agencyId', async (req, res, next) => {
+  try {
+    const staff = await resolveStaff(req);
+    if (!staff) {
+      return res.status(403).json({
+        error: 'no active staff record for this account',
+        code: 'NO_STAFF_RECORD',
+      });
+    }
+    const agencyId = Number(req.params.agencyId);
+    if (!Number.isInteger(agencyId) || agencyId <= 0) {
+      return res.status(400).json({ error: 'agency id must be an integer', code: 'VALIDATION' });
+    }
+    if (await isAgencyMember(pool, staff.id, agencyId)) {
+      // Refuse to strand an ACTIVE episode: a primary cannot leave
+      // an agency while they primary one of its episodes.
+      const primary = await pool.query(
+        `SELECT 1 FROM patient_episodes
+          WHERE primary_user_id = $1 AND agency_id = $2
+            AND status = 'active' AND deleted_at IS NULL`,
+        [staff.id, agencyId],
+      );
+      if (primary.rows.length) {
+        return res.status(409).json({
+          error: 'you are the primary on an active episode at this agency — transfer or discharge it first',
+          code: 'PRIMARY_ON_ACTIVE_EPISODE',
+        });
+      }
+    }
+    const r = await pool.query(
+      'DELETE FROM user_agencies WHERE user_id = $1 AND agency_id = $2 RETURNING 1',
+      [staff.id, agencyId],
+    );
+    if (!r.rows.length) {
+      return res.status(404).json({ error: 'not a member of this agency', code: 'NOT_A_MEMBER' });
+    }
+    insertEvent(pool, {
+      actor: req.user,
+      event: 'agency_membership',
+      details: { action: 'remove', agency_id: agencyId },
+      ip: req.ip || null,
+    }).catch(() => {});
+    res.json({ removed: true, agency_id: agencyId });
   } catch (err) {
     next(err);
   }

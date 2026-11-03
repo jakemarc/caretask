@@ -4,6 +4,8 @@ import {
   createAppointment,
   createAppointmentSeries,
   deleteAppointment,
+  fetchEpisodes,
+  holdReasonLabel,
   isRoleRejection,
   listAppointmentCategories,
   listAppointmentStatuses,
@@ -12,6 +14,8 @@ import {
   updateAppointment,
   updateAppointmentSeries,
   type ApiAppointment,
+  type ApiEpisode,
+  type ApiRequestError,
   type AppointmentCategory,
   type AppointmentStatusInfo,
 } from "../lib/patientApi";
@@ -232,6 +236,16 @@ export default function CalendarView({
   const [fPatientQuery, setFPatientQuery] = useState("");
   const [fPatientOpen, setFPatientOpen] = useState(false);
   const [fProvider, setFProvider] = useState("");
+  // Platform (2026-11-03): the picked patient's ACTIVE episode —
+  // undefined while unknown, null when they have none. The booking
+  // gate lives server-side; this drives the form's team-scoped
+  // Provider options and the no-episode hint.
+  const [formEpisode, setFormEpisode] = useState<
+    ApiEpisode | null | undefined
+  >(undefined);
+  // Manager/admin practice-wide calendar scope (platform §6):
+  // default stays the personal calendar for everyone.
+  const [scopeAll, setScopeAll] = useState(false);
   const [fCategory, setFCategory] = useState("");
   const [fTitle, setFTitle] = useState("");
   const [fDate, setFDate] = useState("");
@@ -342,6 +356,7 @@ export default function CalendarView({
           user,
           range.from.toISOString(),
           range.to.toISOString(),
+          scopeAll ? { scope: "all" } : {},
         );
         if (live) setAppts(rows);
       } catch {
@@ -353,7 +368,51 @@ export default function CalendarView({
     return () => {
       live = false;
     };
-  }, [apiConnected, user, range, refreshTick]);
+  }, [apiConnected, user, range, refreshTick, scopeAll]);
+
+  // Load the form patient's active episode whenever the pick
+  // changes (platform booking gate + team-scoped providers).
+  useEffect(() => {
+    if (!apiConnected || !fPatient) {
+      setFormEpisode(undefined);
+      return;
+    }
+    let live = true;
+    fetchEpisodes(user, fPatient)
+      .then((eps) => {
+        if (live)
+          setFormEpisode(
+            eps.find((e) => e.status !== "discharged") ?? null,
+          );
+      })
+      .catch(() => {
+        if (live) setFormEpisode(undefined);
+      });
+    return () => {
+      live = false;
+    };
+  }, [apiConnected, user, fPatient]);
+
+  // Provider options for the booking form: with a patient picked
+  // and their episode known, the list narrows to the episode's
+  // team (spec §8). The currently chosen provider always stays
+  // listed — editing never loses its value, and a covering
+  // colleague booking for themselves keeps their own default.
+  // Anyone else the API refuses is explained on save.
+  const providerOptions = useMemo(() => {
+    if (!fPatient || !formEpisode) return clinicians;
+    const teamIds = new Set(
+      formEpisode.members
+        .filter((m) => !m.removed_at)
+        .map((m) => String(m.user_id)),
+    );
+    const opts = clinicians.filter((c) => teamIds.has(c.id));
+    if (fProvider && !opts.some((o) => o.id === fProvider)) {
+      const cur = clinicians.find((c) => c.id === fProvider);
+      if (cur) opts.push(cur);
+    }
+    return opts;
+  }, [clinicians, fPatient, formEpisode, fProvider]);
 
   // patient_id → agency {key, name}. The key prefers the linked
   // directory id and falls back to the free-text name, matching
@@ -818,9 +877,30 @@ export default function CalendarView({
       setFormOpen(false);
       setBookingPage(false);
     } catch (err) {
-      setNotice(
-        err instanceof Error ? err.message : "Couldn't save the appointment.",
-      );
+      // Platform booking gate (2026-11-03): explain the refusal in
+      // the clinician's terms, not the API's.
+      const code = (err as ApiRequestError | null)?.code;
+      if (code === "EPISODE_ON_HOLD") {
+        setNotice(
+          err instanceof Error && err.message
+            ? err.message
+            : "This patient's episode is on hold — resume it on their profile, or book a Resumption of Care visit to end the hold.",
+        );
+      } else if (code === "NOT_ON_TEAM") {
+        setNotice(
+          "That provider isn't on the patient's episode team. Add them to the team on the patient's profile, or pick a team member.",
+        );
+      } else if (code === "EPISODE_ACTIVE") {
+        setNotice(
+          "This patient's episode changed while you were booking — reopen the form and try again.",
+        );
+      } else {
+        setNotice(
+          err instanceof Error
+            ? err.message
+            : "Couldn't save the appointment.",
+        );
+      }
     } finally {
       setSaving(false);
     }
@@ -1076,6 +1156,22 @@ export default function CalendarView({
           {notice && <p className="pin-error">{notice}</p>}
 
           <div className="cal-filterbar">
+            {isManager && (
+              <select
+                className="cal-agency-filter"
+                value={scopeAll ? "all" : "mine"}
+                onChange={(e) => setScopeAll(e.target.value === "all")}
+                aria-label="Calendar scope"
+                title={
+                  scopeAll
+                    ? "Showing every clinician's appointments"
+                    : "Showing your own appointments"
+                }
+              >
+                <option value="mine">My calendar</option>
+                <option value="all">All clinicians</option>
+              </select>
+            )}
             {agencyOptions.length > 0 && (
               <select
                 className="cal-agency-filter"
@@ -1456,6 +1552,35 @@ export default function CalendarView({
           {formOpen && (
             <article className="card cal-form">
               <h3>{editing ? "Edit appointment" : "New appointment"}</h3>
+              {!editing && fPatient && formEpisode === null && (
+                <p className="section-note">
+                  No episode for this patient — this visit will be a
+                  personal visit on your own calendar. Episodes only
+                  come into play when an agency team shares a patient;
+                  you can start one anytime from their profile
+                  (Episode of care card).
+                </p>
+              )}
+              {!editing && fPatient && formEpisode && (
+                <p className="section-note">
+                  Episode at {formEpisode.agency_name} —{" "}
+                  {formEpisode.primary_name} is the primary. Providers
+                  are the episode team; a colleague from the same
+                  agency can cover a single visit.
+                </p>
+              )}
+              {!editing &&
+                fPatient &&
+                formEpisode?.status === "on_hold" && (
+                  <p className="section-note">
+                    <strong>This episode is on hold</strong>
+                    {formEpisode.current_hold
+                      ? ` (${holdReasonLabel(formEpisode.current_hold.reason)} since ${formEpisode.current_hold.started_on})`
+                      : ""}
+                    . Only a Resumption of Care visit can be booked —
+                    booking it ends the hold.
+                  </p>
+                )}
               {editing?.series_id && (
                 <div className="cal-scope-row">
                   <span>Part of a series — apply changes to:</span>
@@ -1575,7 +1700,7 @@ export default function CalendarView({
                       onChange={(e) => setFProvider(e.target.value)}
                     >
                       <option value="">Unassigned</option>
-                      {clinicians.map((c) => (
+                      {providerOptions.map((c) => (
                         <option key={c.id} value={c.id}>
                           {c.name}
                         </option>
@@ -1705,7 +1830,7 @@ export default function CalendarView({
                     onChange={(e) => setFProvider(e.target.value)}
                   >
                     <option value="">Unassigned</option>
-                    {clinicians.map((c) => (
+                    {providerOptions.map((c) => (
                       <option key={c.id} value={c.id}>
                         {c.name}
                       </option>
