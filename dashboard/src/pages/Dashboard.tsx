@@ -13,7 +13,10 @@ import {
   Building2,
   CalendarCheck,
   CalendarDays,
+  ArrowLeft,
   CalendarPlus,
+  Cake,
+  ChevronDown,
   ChevronsLeft,
   ChevronsRight,
   ClipboardCheck,
@@ -24,12 +27,14 @@ import {
   CloudRain,
   CloudSnow,
   CloudSun,
+  FileText,
   Flag as FlagIcon,
   Filter,
   HeartPulse,
   LayoutDashboard,
   LifeBuoy,
   Mail,
+  MapPin,
   Menu,
   Monitor,
   Moon,
@@ -44,6 +49,7 @@ import {
   Siren,
   Smartphone,
   Sun,
+  User as UserIcon,
   Users,
   X,
   XCircle,
@@ -73,7 +79,7 @@ import PatientMessages from "../components/PatientMessages";
 import ClinicalDocuments from "../components/ClinicalDocuments";
 import MergeReview from "../components/MergeReview";
 import CallingAppSettings from "../components/CallingAppSettings";
-import PhotoIntake from "../components/PhotoIntake";
+import TextIntake from "../components/TextIntake";
 import TasksPanel from "../components/TasksPanel";
 import NewsCard from "../components/NewsCard";
 import NewsTopicsSettings from "../components/NewsTopicsSettings";
@@ -558,6 +564,8 @@ export default function Dashboard({
   const [formClinician, setFormClinician] = useState("");
   const [formOccupation, setFormOccupation] = useState("");
   const [formReferrer, setFormReferrer] = useState("");
+
+
   const [formInterpreterNeeded, setFormInterpreterNeeded] = useState(false);
   const [formHipaaSms, setFormHipaaSms] = useState(false);
   const [formHipaaEmail, setFormHipaaEmail] = useState(false);
@@ -583,7 +591,29 @@ export default function Dashboard({
   // (The Add form's Google Contacts import button was removed at
   // Jake's direction 2026-11-02; the picker still serves the
   // Clinician tab's staff import.)
-  const [showPhotoIntake, setShowPhotoIntake] = useState(false);
+  const [showTextIntake, setShowTextIntake] = useState(false);
+  const [addedFields, setAddedFields] = useState<string[]>([]);
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
+
+  // Google-Contacts-style Add form: the rarely used fields are
+  // added one at a time from the "Add field" dropdown — unless a
+  // paste/contacts prefill put a value in one of them, in which
+  // case its row is added automatically so the value is visible
+  // instead of silently carried.
+  useEffect(() => {
+    const filled: Array<[string, string]> = [
+      ["mname", formMname],
+      ["phoneHome", formPhoneHome],
+      ["street2", formStreetLine2],
+      ["referrer", formReferrer],
+    ];
+    const missing = filled
+      .filter(([k, v]) => v && !addedFields.includes(k))
+      .map(([k]) => k);
+    if (missing.length > 0) {
+      setAddedFields((prev) => [...prev, ...missing]);
+    }
+  }, [formMname, formPhoneHome, formStreetLine2, formReferrer, addedFields]);
 
   function applyContactToPatientForm(c: ContactCandidate) {
     setFormFname(c.fname);
@@ -3633,58 +3663,73 @@ export default function Dashboard({
 
           {tab === "add" && (
             <section>
-              <h1>Add Patient</h1>
-              <div className="profile-actions">
+              <div className="gform-head">
+                <button
+                  className="gform-back"
+                  type="button"
+                  onClick={() => setTab("list")}
+                  aria-label="Back to patients"
+                >
+                  <ArrowLeft size={20} />
+                </button>
+                <span className="gform-title">Add Patient</span>
+                <span className="gform-spacer" />
                 <button
                   className="btn btn-secondary"
                   type="button"
-                  onClick={() => setShowPhotoIntake((v) => !v)}
+                  onClick={() => setShowTextIntake((v) => !v)}
                 >
-                  Add by photo
+                  Paste
+                </button>
+                <button
+                  className="btn btn-primary"
+                  type="submit"
+                  form="add-patient-form"
+                >
+                  Save
                 </button>
               </div>
-              {showPhotoIntake && (
-                <PhotoIntake
+              {showTextIntake && (
+                <TextIntake
                   onApply={(candidate, referrer) => {
                     applyContactToPatientForm(candidate);
                     if (referrer) setFormReferrer(referrer);
-                    setShowPhotoIntake(false);
+                    setShowTextIntake(false);
                   }}
-                  onClose={() => setShowPhotoIntake(false)}
+                  onClose={() => setShowTextIntake(false)}
                 />
               )}
-              <form className="add-form" onSubmit={handleAddPatient}>
+              <form
+                className="add-form gform"
+                id="add-patient-form"
+                onSubmit={handleAddPatient}
+              >
                 {addFormError && (
                   <div className="dup-panel" role="alert">
                     <p>{addFormError}</p>
                   </div>
                 )}
-                <h3>Name</h3>
-                <label>
-                  First name *
-                  <input
-                    value={formFname}
-                    onChange={(e) => setFormFname(e.target.value)}
-                    required
-                    placeholder="e.g. Jake"
-                  />
-                </label>
-                <label>
-                  Middle name
-                  <input
-                    value={formMname}
-                    onChange={(e) => setFormMname(e.target.value)}
-                  />
-                </label>
-                <label>
-                  Last name *
-                  <input
-                    value={formLname}
-                    onChange={(e) => setFormLname(e.target.value)}
-                    required
-                    placeholder="e.g. Marc"
-                  />
-                </label>
+                <div className="gform-row">
+                  <span className="gform-ico">
+                    <UserIcon size={20} />
+                  </span>
+                  <div className="gform-fields">
+                    <input
+                      value={formFname}
+                      onChange={(e) => setFormFname(e.target.value)}
+                      required
+                      placeholder="First name"
+                      aria-label="First name"
+                    />
+                    <input
+                      value={formLname}
+                      onChange={(e) => setFormLname(e.target.value)}
+                      required
+                      placeholder="Last name"
+                      aria-label="Last name"
+                    />
+                  </div>
+                </div>
                 {(dupChecking || dupMatches.length > 0) && (
                   <div className="dup-panel" role="alert">
                     {dupMatches.length === 0 ? (
@@ -3717,149 +3762,319 @@ export default function Dashboard({
                     )}
                   </div>
                 )}
-                <label>
-                  Date of birth
-                  <input
-                    type="date"
-                    value={formDob}
-                    onChange={(e) => setFormDob(e.target.value)}
-                  />
-                </label>
-                <label>
-                  Age
-                  <input
-                    type="number"
-                    min={0}
-                    max={130}
-                    inputMode="numeric"
-                    value={formAge}
-                    onChange={(e) => setFormAge(e.target.value)}
-                  />
-                </label>
-                <label>
-                  Sex
-                  <select
-                    value={formSex}
-                    onChange={(e) => setFormSex(e.target.value)}
-                  >
-                    <option value="">Select…</option>
-                    <option value="Female">Female</option>
-                    <option value="Male">Male</option>
-                    <option value="Intersex">Intersex</option>
-                    <option value="Other">Other</option>
-                    <option value="Unknown">Unknown</option>
-                  </select>
-                </label>
-                <h3>Contact</h3>
-                <label>
-                  Home phone
-                  <input
-                    value={formPhoneHome}
-                    inputMode="tel"
-                    onChange={(e) =>
-                      setFormPhoneHome(formatUSPhone(e.target.value))
-                    }
-                    placeholder="(312) 555-0100"
-                  />
-                </label>
-                <label>
-                  Cell phone
-                  <input
-                    value={formPhoneCell}
-                    inputMode="tel"
-                    onChange={(e) =>
-                      setFormPhoneCell(formatUSPhone(e.target.value))
-                    }
-                    placeholder="(312) 555-0101"
-                  />
-                </label>
-                <div className="form-field">
-                  <span>Street</span>
-                  <AddressAutocomplete
-                    value={formStreet}
-                    onChange={(v) => {
-                      setFormStreet(v);
-                      setFormLat(null);
-                      setFormLng(null);
-                    }}
-                    onSelectAddress={(a) => {
-                      setFormStreet(a.street);
-                      setFormCity(a.city);
-                      setFormState(a.state);
-                      setFormPostalCode(a.postal_code);
-                      setFormLat(a.latitude);
-                      setFormLng(a.longitude);
-                    }}
-                  />
-                </div>
-                <label>
-                  Street line 2
-                  <input
-                    value={formStreetLine2}
-                    onChange={(e) => setFormStreetLine2(e.target.value)}
-                    placeholder="Apt / suite"
-                  />
-                </label>
-                <label>
-                  City
-                  <input
-                    value={formCity}
-                    onChange={(e) => setFormCity(e.target.value)}
-                  />
-                </label>
-                <div className="form-row">
-                  <label>
-                    State
-                    <StateSelect value={formState} onChange={setFormState} />
-                  </label>
-                  <label>
-                    Postal code
+                <div className="gform-row">
+                  <span className="gform-ico">
+                    <Cake size={20} />
+                  </span>
+                  <div className="gform-fields">
+                    <span className="gform-cap">Date of birth</span>
                     <input
-                      value={formPostalCode}
-                      onChange={(e) => setFormPostalCode(e.target.value)}
+                      type="date"
+                      value={formDob}
+                      onChange={(e) => setFormDob(e.target.value)}
+                      aria-label="Date of birth"
                     />
-                  </label>
+                    <div className="form-row">
+                      <input
+                        type="number"
+                        min={0}
+                        max={130}
+                        inputMode="numeric"
+                        value={formAge}
+                        onChange={(e) => setFormAge(e.target.value)}
+                        placeholder="Age"
+                        aria-label="Age"
+                      />
+                      <select
+                        value={formSex}
+                        onChange={(e) => setFormSex(e.target.value)}
+                        aria-label="Sex"
+                      >
+                        <option value="">Sex</option>
+                        <option value="Female">Female</option>
+                        <option value="Male">Male</option>
+                        <option value="Intersex">Intersex</option>
+                        <option value="Other">Other</option>
+                        <option value="Unknown">Unknown</option>
+                      </select>
+                    </div>
+                  </div>
                 </div>
-                <label>
-                  Status
-                  <select
-                    value={formStatus}
-                    onChange={(e) =>
-                      setFormStatus(e.target.value as PatientStatus)
-                    }
-                  >
-                    <option value="active">Active</option>
-                    <option value="hold">On hold</option>
-                    <option value="discharged">Discharged</option>
-                  </select>
-                </label>
-                <div className="form-field">
-                  <span>Agency</span>
-                  <AgencyPicker
-                    user={user}
-                    apiConnected={apiStatus === "connected"}
-                    agencyId={formAgencyId}
-                    agencyNameText={formAgencyText || null}
-                    onChange={(sel) => {
-                      setFormAgencyId(sel.agencyId);
-                      setFormAgencyText(sel.agencyNameText ?? "");
-                    }}
-                    patientCity={formCity}
-                    resetKey="add-patient"
-                  />
+                <div className="gform-row">
+                  <span className="gform-ico">
+                    <Phone size={20} />
+                  </span>
+                  <div className="gform-fields">
+                    <input
+                      value={formPhoneCell}
+                      inputMode="tel"
+                      onChange={(e) =>
+                        setFormPhoneCell(formatUSPhone(e.target.value))
+                      }
+                      placeholder="Cell phone"
+                      aria-label="Cell phone"
+                    />
+                  </div>
                 </div>
-                <label>
-                  Note
-                  <textarea
-                    rows={3}
-                    value={formNote}
-                    onChange={(e) => setFormNote(e.target.value)}
-                    placeholder="e.g. On track — recent check-in normal"
-                  />
-                </label>
-                <button className="btn btn-primary" type="submit">
-                  Add patient
-                </button>
+                <div className="gform-row">
+                  <span className="gform-ico">
+                    <Mail size={20} />
+                  </span>
+                  <div className="gform-fields">
+                    <input
+                      value={formEmail}
+                      inputMode="email"
+                      onChange={(e) => setFormEmail(e.target.value)}
+                      placeholder="Email"
+                      aria-label="Email"
+                    />
+                  </div>
+                </div>
+                <div className="gform-row">
+                  <span className="gform-ico">
+                    <MapPin size={20} />
+                  </span>
+                  <div className="gform-fields">
+                    <div className="form-field">
+                      <AddressAutocomplete
+                        value={formStreet}
+                        onChange={(v) => {
+                          setFormStreet(v);
+                          setFormLat(null);
+                          setFormLng(null);
+                        }}
+                        onSelectAddress={(a) => {
+                          setFormStreet(a.street);
+                          setFormCity(a.city);
+                          setFormState(a.state);
+                          setFormPostalCode(a.postal_code);
+                          setFormLat(a.latitude);
+                          setFormLng(a.longitude);
+                        }}
+                      />
+                    </div>
+                    <input
+                      value={formCity}
+                      onChange={(e) => setFormCity(e.target.value)}
+                      placeholder="City"
+                      aria-label="City"
+                    />
+                    <div className="form-row">
+                      <StateSelect value={formState} onChange={setFormState} />
+                      <input
+                        value={formPostalCode}
+                        onChange={(e) => setFormPostalCode(e.target.value)}
+                        placeholder="Postal code"
+                        aria-label="Postal code"
+                      />
+                    </div>
+                  </div>
+                </div>
+                <div className="gform-row">
+                  <span className="gform-ico">
+                    <Building2 size={20} />
+                  </span>
+                  <div className="gform-fields">
+                    <div className="form-field">
+                      <AgencyPicker
+                        user={user}
+                        apiConnected={apiStatus === "connected"}
+                        agencyId={formAgencyId}
+                        agencyNameText={formAgencyText || null}
+                        onChange={(sel) => {
+                          setFormAgencyId(sel.agencyId);
+                          setFormAgencyText(sel.agencyNameText ?? "");
+                        }}
+                        patientCity={formCity}
+                        resetKey="add-patient"
+                      />
+                    </div>
+                  </div>
+                </div>
+                <div className="gform-row">
+                  <span className="gform-ico">
+                    <ClipboardCheck size={20} />
+                  </span>
+                  <div className="gform-fields">
+                    <span className="gform-cap">Status</span>
+                    <select
+                      value={formStatus}
+                      onChange={(e) =>
+                        setFormStatus(e.target.value as PatientStatus)
+                      }
+                      aria-label="Status"
+                    >
+                      <option value="active">Active</option>
+                      <option value="hold">On hold</option>
+                      <option value="discharged">Discharged</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="gform-row">
+                  <span className="gform-ico">
+                    <FileText size={20} />
+                  </span>
+                  <div className="gform-fields">
+                    <textarea
+                      rows={3}
+                      value={formNote}
+                      onChange={(e) => setFormNote(e.target.value)}
+                      placeholder="Notes"
+                      aria-label="Notes"
+                    />
+                  </div>
+                </div>
+                {(() => {
+                  const optionalFields: Array<{
+                    key: string;
+                    label: string;
+                    Icon: typeof Phone;
+                  }> = [
+                    { key: "mname", label: "Middle name", Icon: UserIcon },
+                    { key: "phoneHome", label: "Home phone", Icon: Phone },
+                    { key: "street2", label: "Street line 2", Icon: MapPin },
+                    { key: "referrer", label: "Referred by", Icon: Users },
+                  ];
+                  const remaining = optionalFields.filter(
+                    (f) => !addedFields.includes(f.key),
+                  );
+                  const removeField = (key: string) => {
+                    if (key === "mname") setFormMname("");
+                    if (key === "phoneHome") setFormPhoneHome("");
+                    if (key === "street2") setFormStreetLine2("");
+                    if (key === "referrer") setFormReferrer("");
+                    setAddedFields((prev) => prev.filter((k) => k !== key));
+                  };
+                  const removeBtn = (key: string, label: string) => (
+                    <button
+                      className="gform-remove"
+                      type="button"
+                      aria-label={`Remove ${label}`}
+                      onClick={() => removeField(key)}
+                    >
+                      <X size={16} />
+                    </button>
+                  );
+                  return (
+                    <>
+                      {addedFields.includes("mname") && (
+                        <div className="gform-row">
+                          <span className="gform-ico">
+                            <UserIcon size={20} />
+                          </span>
+                          <div className="gform-fields">
+                            <input
+                              value={formMname}
+                              onChange={(e) => setFormMname(e.target.value)}
+                              placeholder="Middle name"
+                              aria-label="Middle name"
+                            />
+                          </div>
+                          {removeBtn("mname", "Middle name")}
+                        </div>
+                      )}
+                      {addedFields.includes("phoneHome") && (
+                        <div className="gform-row">
+                          <span className="gform-ico">
+                            <Phone size={20} />
+                          </span>
+                          <div className="gform-fields">
+                            <input
+                              value={formPhoneHome}
+                              inputMode="tel"
+                              onChange={(e) =>
+                                setFormPhoneHome(formatUSPhone(e.target.value))
+                              }
+                              placeholder="Home phone"
+                              aria-label="Home phone"
+                            />
+                          </div>
+                          {removeBtn("phoneHome", "Home phone")}
+                        </div>
+                      )}
+                      {addedFields.includes("street2") && (
+                        <div className="gform-row">
+                          <span className="gform-ico">
+                            <MapPin size={20} />
+                          </span>
+                          <div className="gform-fields">
+                            <input
+                              value={formStreetLine2}
+                              onChange={(e) =>
+                                setFormStreetLine2(e.target.value)
+                              }
+                              placeholder="Street line 2 (apt / suite)"
+                              aria-label="Street line 2"
+                            />
+                          </div>
+                          {removeBtn("street2", "Street line 2")}
+                        </div>
+                      )}
+                      {addedFields.includes("referrer") && (
+                        <div className="gform-row">
+                          <span className="gform-ico">
+                            <Users size={20} />
+                          </span>
+                          <div className="gform-fields">
+                            <input
+                              value={formReferrer}
+                              onChange={(e) => setFormReferrer(e.target.value)}
+                              placeholder="Referred by"
+                              aria-label="Referred by"
+                            />
+                          </div>
+                          {removeBtn("referrer", "Referred by")}
+                        </div>
+                      )}
+                      {remaining.length > 0 && (
+                        <div className="gform-addwrap">
+                          <button
+                            className="gform-more-btn"
+                            type="button"
+                            onClick={() => setAddMenuOpen((v) => !v)}
+                            aria-expanded={addMenuOpen}
+                          >
+                            <Plus size={16} />
+                            Add field
+                            <ChevronDown
+                              size={16}
+                              className={
+                                addMenuOpen ? "gform-chev open" : "gform-chev"
+                              }
+                            />
+                          </button>
+                          {addMenuOpen && (
+                            <>
+                              <button
+                                className="gform-backdrop"
+                                type="button"
+                                aria-hidden="true"
+                                tabIndex={-1}
+                                onClick={() => setAddMenuOpen(false)}
+                              />
+                              <div className="gform-addmenu" role="menu">
+                                {remaining.map(({ key, label, Icon }) => (
+                                  <button
+                                    key={key}
+                                    type="button"
+                                    role="menuitem"
+                                    onClick={() => {
+                                      setAddedFields((prev) => [...prev, key]);
+                                      setAddMenuOpen(false);
+                                    }}
+                                  >
+                                    <Icon size={18} />
+                                    {label}
+                                  </button>
+                                ))}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </form>
             </section>
           )}

@@ -739,6 +739,45 @@ Rows save with their agency_id / agency_name_text / status —
 createPatient already accepted all three, so this is
 dashboard-only. Staff import is unchanged.
 
+## Add Patient form + Paste intake (Live 2026-11-03, deploy-34)
+
+- `.gform`: the Add Patient form is Google-Contacts-style —
+  `.gform-row`s with a lucide icon column and placeholder-
+  labelled inputs; `.gform-head` is sticky (back arrow,
+  title, Paste button, Save as a pill submitting
+  `form="add-patient-form"`; 72px scroll offset at phone
+  widths under the fixed top bar). Visible rows: name,
+  DOB (+ Age/Sex pair), cell phone, email, address
+  (autocomplete + city + state/ZIP), agency, status, notes.
+  The duplicate panel still appears under the name.
+- **Add field dropdown** (`.gform-addmenu`): middle name,
+  home phone, street line 2, referred-by are added one at a
+  time (`addedFields` state); each added row has a remove
+  (×) that also clears the value. An effect auto-adds the
+  row when a paste/contacts prefill gives a hidden field a
+  value, so no value ever saves invisibly.
+- **Paste intake** (`src/components/TextIntake.tsx`)
+  REPLACES Add by photo on the Add form: paste raw text →
+  `parseIntakeText` (src/lib/photoExtract.ts) sifts it live,
+  on-device → Found summary → "Use these details" fills the
+  form via the same `applyContactToPatientForm` path.
+  `PhotoIntake.tsx` is no longer imported anywhere (the
+  tesseract chunk left the bundle); the component file stays
+  dormant. photoExtract gained a prose-debris guard for the
+  referrer capture.
+- Calendar, same round: visit type in the entry card is a
+  `<select>` (appointment types; defaults to Revisit via
+  openCreate; change still sets the standard duration); the
+  Room input is hidden (state/payload kept); day-list and
+  agenda rows are wrapped in `.cal-row-wrap` with a
+  `.cal-row-edit` pencil that opens the booking page;
+  selecting a row scrolls `.cal-detail` into view at phone
+  widths; opening/closing the booking page scrolls it (or
+  the calendar) to the top via bookHead/section refs +
+  scroll-margin; desktop `.cal-day-full` rows no longer show
+  provider or the status pill; the Patients-page
+  `.add-patient-btn` loses its + icon at ≥721px.
+
 ## Calendar chrome (Live 2026-11-03, deploy-33)
 
 - The view toggle buttons carry line icons next to their

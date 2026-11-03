@@ -459,7 +459,15 @@ function extractFromLines(inputLines: string[]): ExtractedIntake {
     labeled(
       /(?:Referring(?:\s+(?:Physician|Provider|Doctor))?|Referred\s+by|Ordering(?:\s+(?:Physician|Provider))?|Ref\.?\s*(?:Physician|Provider|Doctor))\s*[:#]?\s*(.+)/i,
     ) ?? "";
-  const cleanRef = referrer.replace(/\s{2,}.*$/, "").trim();
+  let cleanRef = referrer.replace(/\s{2,}.*$/, "").trim();
+  // Prose pastes can make the referrer pattern grab sentence
+  // debris ("...is the referring doc. Thanks!" captures
+  // "doc. Thanks!"). A capture that starts lowercase and runs
+  // into a second sentence is debris, not a name — drop it.
+  // Labeled captures ("Dr. ...", "Patel, MD") are unaffected.
+  if (/^[a-z]/.test(cleanRef) && cleanRef.includes(". ")) {
+    cleanRef = "";
+  }
 
   return { candidate: c, referrer: cleanRef, found };
 }

@@ -6,6 +6,53 @@ built and verified but not deployed.
 
 ## 2026-11-02
 
+- **Add Patient form + intake + entry round — Live
+  2026-11-03 (deploy-34: dashboard-only, bundle
+  `index-EjZSyNlU.js`, deployment
+  https://1b1d1c9c.marcinnotech-app.pages.dev, canonical
+  `1b1d1c9c-9fbe-41a0-abd5-a100019c14ce`; verified —
+  canonical matches, deployment URL serves the new bundle,
+  main-domain asset 200, /health green. The deploy-33 token
+  was reused, so no new token or sign-in was needed.** From
+  Jake's Google Contacts reference photos and his follow-ups:
+  (1) the Add Patient form is rebuilt Google-style — icon
+  rows (person / cake / phone / mail / pin / building /
+  clipboard / note), the placeholder IS the label, a sticky
+  header (back arrow + Paste + Save top-right, the Save
+  submits via the form id); Email and Referred-by fields are
+  visible for the first time (they existed as state, filled
+  only by imports); cell phone precedes home phone;
+  (2) optional fields (middle name, home phone, street
+  line 2, referred by) are added one at a time from an
+  **Add field** dropdown (Jake's replacement for the brief
+  Show more block) — each row removable (removal clears the
+  value), and a paste/import that fills one adds its row
+  automatically so nothing saves invisibly; (3) **Add by
+  photo is replaced by Paste** (Jake): `TextIntake` — paste
+  raw text, the same sifter (`parseIntakeText`) runs live
+  on-device, a Found summary reviews before "Use these
+  details" fills the form; a prose-debris guard keeps
+  sentence fragments out of the referrer; PhotoIntake is
+  out of the bundle (component dormant in the repo,
+  tesseract chunk gone) and Paste works on phones too
+  (Jake reversed the desktop-only call); (4) the entry
+  card's visit-type chips are now a dropdown, still
+  defaulting to Revisit and still setting the type's
+  standard duration on change; (5) the Room field is hidden
+  in the appointment form (data plumbing kept, values
+  preserved); (6) every day-list/agenda appointment row
+  gains a pencil Edit button opening the booking page
+  directly, and on phones the detail card scrolls into view
+  when a row is tapped; (7) the booking page scrolls itself
+  to the top when it opens (and back to the calendar top
+  when it closes) — the form no longer opens above the
+  user's scroll position; (8) desktop cleanup: the Patients
+  page button reads just "Add Patient" (no + icon; phones
+  keep the icon-only collapse), and desktop appointment rows
+  drop the provider and status pill (status stays on the
+  detail card where it is changed). Jake's phone/desktop
+  checks are the remaining verification.
+
 - **Calendar chrome round — Live 2026-11-03 (deploy-33:
   dashboard-only, bundle `index-CyTZ4rRw.js`, deployment
   https://e50734ee.marcinnotech-app.pages.dev, canonical
