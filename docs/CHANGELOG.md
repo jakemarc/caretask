@@ -6,6 +6,34 @@ built and verified but not deployed.
 
 ## 2026-11-02
 
+- **Calendar chrome round — Live 2026-11-03 (deploy-33:
+  dashboard-only, bundle `index-CyTZ4rRw.js`, deployment
+  https://e50734ee.marcinnotech-app.pages.dev, canonical
+  `e50734ee-e434-4f73-a765-5df172ba0b6e`; verified —
+  canonical matches, deployment URL serves the new bundle,
+  main-domain asset 200, /health green).** Four pieces from
+  Jake's late-night review of the live calendar: (1) the
+  view toggle gains line icons (Day = list, 3 Day =
+  calendar-range, Week = calendar-days, Month = grid,
+  Map = map) beside the labels; (2) the agency filter LEAVES
+  the toolbar row for its own filter row (inside the
+  non-wrapping button row its 210px width shoved the phone
+  layout sideways) — capped 190px, full-width on phones;
+  (3) booking is its own PAGE: the New appointment button
+  moved to the filter row's right end, and opening the form
+  (button, sidebar Appointment entry, edit) swaps the
+  calendar out for a full page with a ‹ Calendar back row;
+  saving returns to the calendar ON the booked day;
+  (4) Jake picked the FULL removal of the mobile header
+  band (option B over the slimming): at phone widths the
+  page's own "Calendar" heading (a duplicate of the top
+  bar) and the ‹ Today › pager + range title are gone.
+  Compensation built in: tapping a grey edge day in Month
+  view moves the grid to that month, and tapping the Day
+  toggle at phone widths re-anchors the list on today.
+  Desktop unchanged. Jake's phone check is the remaining
+  verification.
+
 - **Entry card, series, drag + infra — Live 2026-11-02
   (deploy-32: dashboard bundle `index-BSgea7TM.js`,
   deployment https://226c7d81.marcinnotech-app.pages.dev,

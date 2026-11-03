@@ -739,6 +739,28 @@ Rows save with their agency_id / agency_name_text / status —
 createPatient already accepted all three, so this is
 dashboard-only. Staff import is unchanged.
 
+## Calendar chrome (Live 2026-11-03, deploy-33)
+
+- The view toggle buttons carry line icons next to their
+  labels (List / CalendarRange / CalendarDays / LayoutGrid /
+  Map from lucide-react).
+- The agency filter sits in `.cal-filterbar`, its own row
+  under the toolbar, with the **+ New appointment** button at
+  the row's right end. The select is capped at 190px on
+  desktop and stretches full-width on phones.
+- **Booking is a page, not a card:** `bookingPage` state in
+  CalendarView — while the form is open, the toolbar, filter
+  bar, views and detail card are hidden and a "‹ Calendar"
+  back row sits above the form. Save returns to the calendar
+  anchored on the booked (or first series) day.
+- **Mobile header band removed (Jake's pick "B"):** at
+  ≤720px (not force-desktop), `.cal-page-title` and
+  `.cal-pager` (‹ Today › + range title) are display:none.
+  Steering replacements: a month-cell tap on an out-of-month
+  day re-anchors the grid to that month; the Day toggle at
+  phone widths resets the anchor to today. Desktop keeps
+  the heading, pager and title.
+
 ## Entry card, series builder, drag (Live 2026-11-02, deploy-32)
 
 **Simple entry card (Jake: "as simple as a Google appointment

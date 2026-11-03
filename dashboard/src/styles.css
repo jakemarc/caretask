@@ -4478,7 +4478,40 @@ label.contact-picker-row {
   font-size: 14px;
   background: var(--panel);
   color: var(--text);
-  max-width: 210px;
+  width: 190px;
+  max-width: 100%;
+}
+/* The agency filter lives on its OWN row under the toolbar
+   (Jake, 2026-11-03): inside the button row its long option
+   labels stretched it across the phone screen. Right-aligned
+   and capped on desktop; full-width on its own row on phones,
+   where the toggle row above it is never touched. */
+.cal-filterbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: -2px 0 10px;
+}
+.cal-new-btn {
+  margin-left: auto;
+  white-space: nowrap;
+}
+.cal-book-head {
+  margin-bottom: 10px;
+}
+.cal-book-head .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+@media (max-width: 720px) {
+  .app-shell:not(.force-desktop) .cal-filterbar {
+    justify-content: flex-start;
+  }
+  .app-shell:not(.force-desktop) .cal-agency-filter {
+    flex: 1;
+    width: 100%;
+  }
 }
 .cal-chip-agency {
   opacity: 0.72;
@@ -4884,4 +4917,22 @@ label.contact-picker-row {
   outline: 2px dashed var(--teal, #0d9488);
   outline-offset: -2px;
   background: rgba(13, 148, 136, 0.08);
+}
+
+.cal-view-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* Mobile: the calendar header band is gone entirely (Jake
+   picked the full removal, 2026-11-03) — no page heading (the
+   top bar names the view), no pager row. Month changes by
+   tapping the grey edge days; the Day toggle re-anchors on
+   today. Desktop keeps everything. */
+@media (max-width: 720px) {
+  .app-shell:not(.force-desktop) .cal-page-title,
+  .app-shell:not(.force-desktop) .cal-pager {
+    display: none;
+  }
 }
