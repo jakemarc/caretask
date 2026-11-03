@@ -17,6 +17,7 @@ const express = require('express');
 const pool = require('../db');
 const { insertEvent } = require('../lib/eventLog');
 const { requireRole } = require('../lib/requireRole');
+const contactSync = require('../lib/contactSync');
 
 const router = express.Router();
 
@@ -370,6 +371,8 @@ router.post('/', requireRole('manager', 'admin'), async (req, res) => {
       },
     });
     await client.query('COMMIT');
+    contactSync.pokePatient(survivorId);
+    contactSync.pokePatient(loserId);
     return res.status(201).json({
       merge: {
         id: Number(mg.rows[0].id),
@@ -434,6 +437,8 @@ router.post('/:id/undo', requireRole('manager', 'admin'), async (req, res) => {
       },
     });
     await client.query('COMMIT');
+    contactSync.pokePatient(mg.survivor_id);
+    contactSync.pokePatient(mg.loser_id);
     return res.json({ undone: true, merge_id: mergeId });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});

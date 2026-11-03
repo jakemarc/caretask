@@ -173,3 +173,35 @@ live episode → booking works, visit stored unstamped
 exists; a personal visit never creates an episode or blocks
 an agency admission. Verified: platform suite 90 checks,
 full battery green, dashboard builds clean.
+
+DEPLOYED as deploy-35 (2026-11-03, Jake's go after reviewing
+the migration walkthrough). API: schema + migration live
+(backup caretask-20261103-174227.dump first). Catch found by
+the counts: Jake's admin row (jakemarc@gmail.com) was inactive
+in the live users table, so the migration's first run linked
+only 8 patients; the row was activated (his recorded admin
+account) and the idempotent migration re-run: 136 links, 4
+episodes, 4 members, 5 memberships, 2 appointments stamped.
+/health ok, 401 unauthenticated. Live patients: 128 — 119 of
+them created 2026-11-02 (repeated contacts imports during
+testing, before registry dedupe existed); cleanup via the
+merge tool is Jake's call, not done. Dashboard: canonical
+7525e40a, bundle index-D9AQpxmV.js, plus Jake's cache fix —
+never-cache headers on the shell + version.json (verified
+live) and a startup stale-build check that reloads once.
+GitHub: branch deploy-35 600d79fc, main f16fae19, read-back
+verified. Remaining verification: Jake's signed-in check.
+
+PHONE CONTACTS SYNC (CardDAV) — Jake's choices (2026-11-03):
+live sync over a vCard export; the phone list is named
+"CareTask"; the CardDAV route over Google Contacts (People API
+is not BAA-covered). Jake approved the spec's defaults
+(one-way, read-only phone account, address included, hourly
+reconcile, contacts.marcinnotech.net) by saying "go" to the
+build. Spec: carddav-contacts-sync-spec.md. Built and deployed
+as deploy-36: Radicale 3.9 on the API VM (systemd, htpasswd
+bcrypt, rights = clinician read-only own book + service writer),
+API sync engine + Settings card; verified locally against a
+real Radicale (35 checks) before deploy. Public reachability
+waits on the contacts DNS record + Caddy TLS; Jake's iPhone
+pilot is the final verification.

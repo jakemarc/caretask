@@ -45,6 +45,7 @@ const { insertEvent } = require('../lib/eventLog');
 const { requireRole, attachManager } = require('../lib/requireRole');
 const requireManagerRole = requireRole('manager', 'admin');
 const { computeDisplayName } = require('./agencies');
+const contactSync = require('../lib/contactSync');
 const {
   resolveStaff,
   isPlatformAdmin,
@@ -700,6 +701,7 @@ router.post('/', async (req, res, next) => {
     }
     const shaped = await decoratePatient(created);
     shaped.status = linkStatus;
+    contactSync.pokeUser(req.staff.id);
     res.status(201).json(shaped);
   } catch (err) {
     next(err);
@@ -781,6 +783,7 @@ router.put('/:id', attachManager, async (req, res, next) => {
     if (!updated) {
       return res.status(404).json({ error: 'patient not found' });
     }
+    contactSync.pokePatient(req.params.id);
     res.json(await decoratePatient(updated));
   } catch (err) {
     next(err);
@@ -828,6 +831,7 @@ router.delete('/:id', requireManagerRole, async (req, res, next) => {
     if (!deleted) {
       return res.status(404).json({ error: 'patient not found' });
     }
+    contactSync.pokePatient(req.params.id);
     res.status(204).end();
   } catch (err) {
     next(err);
@@ -878,6 +882,7 @@ router.post('/:id/restore', requireManagerRole, async (req, res, next) => {
     if (restored.status === 409) {
       return res.status(409).json({ error: 'patient is not deleted' });
     }
+    contactSync.pokePatient(req.params.id);
     res.json(restored.row);
   } catch (err) {
     next(err);
@@ -925,6 +930,7 @@ router.post('/:id/link', async (req, res, next) => {
       details: {},
       ip: req.ip || null,
     }).catch(() => {});
+    contactSync.pokeUser(req.staff.id);
     res.json({ linked: true, patient_id: req.params.id, list_status: r.rows[0].list_status });
   } catch (err) {
     next(err);
@@ -961,6 +967,7 @@ router.delete('/:id/link', async (req, res, next) => {
       details: {},
       ip: req.ip || null,
     }).catch(() => {});
+    contactSync.pokeUser(req.staff.id);
     res.json({ linked: false, patient_id: req.params.id });
   } catch (err) {
     next(err);
@@ -995,6 +1002,7 @@ router.put('/:id/link', async (req, res, next) => {
         code: 'NOT_LINKED',
       });
     }
+    contactSync.pokeUser(req.staff.id);
     res.json({ linked: true, patient_id: req.params.id, list_status: r.rows[0].list_status });
   } catch (err) {
     next(err);

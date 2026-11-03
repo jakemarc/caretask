@@ -34,6 +34,7 @@ const {
   isAgencyMember,
 } = require('../lib/platform');
 const { computeDisplayName } = require('./agencies');
+const contactSync = require('../lib/contactSync');
 
 const router = express.Router();
 
@@ -511,6 +512,7 @@ router.delete('/:id', requireManagerRole, async (req, res, next) => {
     if (outcome.status === 400) {
       return res.status(400).json(outcome.body);
     }
+    contactSync.pokeUser(req.params.id);
     res.status(204).end();
   } catch (err) {
     next(err);

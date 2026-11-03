@@ -44,6 +44,8 @@ const tasksRouter = require('./routes/tasks');
 const newsRouter = require('./routes/news');
 const episodesRouter = require('./routes/episodes');
 const invitesRouter = require('./routes/invites');
+const contactSyncRouter = require('./routes/contactSync');
+const { startContactSyncTimer } = require('./lib/contactSync');
 
 // Fail fast at boot if the Firebase project is not configured: without it,
 // token verification cannot work, and silently rejecting everything would
@@ -120,6 +122,10 @@ app.use('/news', requireAuth, requireStaff, newsRouter);
 // Episodes: the router carries full paths (/patients/:id/episodes,
 // /episodes/:id/...) so it mounts at root, after the patients router.
 app.use('/', requireAuth, requireStaff, episodesRouter);
+// Phone contacts sync (CardDAV): per-clinician self-service under
+// /contact-sync/me. Inert unless the CARDDAV_* env is configured.
+app.use('/contact-sync', requireAuth, requireStaff, contactSyncRouter);
+startContactSyncTimer();
 
 // Error handler: log the real error server-side, send a generic message.
 app.use((err, req, res, next) => {
