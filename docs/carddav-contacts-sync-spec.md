@@ -3,10 +3,11 @@
 Status: **BUILT + DEPLOYED as deploy-36 (2026-11-03)** —
 written 2026-11-03 at Jake's direction ("Spec the CardDAV
 route"); Jake approved the build ("go") the same day, adopting
-the §13 defaults. API + Radicale + dashboard are live; public
-reachability waits on the contacts.marcinnotech.net DNS
-record (Caddy TLS follows automatically), and Jake's iPhone
-pilot is the final verification.
+the §13 defaults. API + Radicale + dashboard are live; the
+contacts.marcinnotech.net DNS record was added 2026-11-03 and
+the production TLS certificate + HTTPS serving are verified —
+the feature is fully LIVE; Jake's iPhone pilot is the final
+device check.
 Decisions already locked by Jake (2026-11-03): live sync (not a
 one-off export); the phone list is named **CareTask**; the
 CardDAV route over the Google Contacts route.
