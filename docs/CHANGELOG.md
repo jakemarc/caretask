@@ -6,6 +6,31 @@ built and verified but not deployed.
 
 ## 2026-11-02
 
+- **Entry card, series, drag + infra — Live 2026-11-02
+  (deploy-32: dashboard bundle `index-BSgea7TM.js`,
+  deployment https://226c7d81.marcinnotech-app.pages.dev,
+  canonical `226c7d81-cade-4a1c-ba14-ab1af0a352a9`; API =
+  routes/appointments.js + server.js replaced on the VM,
+  `schema-appointment-series.sql` run once, service
+  restarted; verified — canonical matches, deployment URL
+  serves the new bundle, main-domain asset 200, /health
+  green, the new deployment's own preview origin receives
+  the API's CORS allow header, the live DB carries
+  series_id).** Jake said "run all of these" to the queue:
+  (1) the Google-simple entry card (chips, More options);
+  (2) the staggered-phase series builder end to end —
+  computed visit dates on the dashboard, one-transaction
+  create on the API, this-visit/whole-series edit + delete;
+  (3) drag between days on Month chips and Week/3-Day
+  blocks (press-and-hold on touch); (4) infra: automated
+  daily database backups on the VM (systemd timer 08:15
+  UTC, 14-day rotation, test-run verified), API CORS
+  widened to preview origins, and the matching Places-key
+  referrer entry. API suites: series 20/20 + appointments
+  all-pass on a fresh database (one stale suite expectation
+  updated — creates now default to 'scheduled'). Jake's
+  signed-in phone check is the remaining verification.
+
 - **Calendar + intake batch — Live 2026-11-02 (deploy-31:
   dashboard bundle `index-BY1uCmzT.js`, deployment
   https://f6cf702c.marcinnotech-app.pages.dev, canonical

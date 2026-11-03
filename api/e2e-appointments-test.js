@@ -244,7 +244,7 @@ async function main() {
     check('appointment_change events written', mine.length >= 3, `found ${mine.length}`);
     check('status event carries from/to',
       mine.some((e) => e.details?.action === 'appointment_status'
-        && e.details?.from_status === 'booked' && e.details?.to_status === 'arrived'));
+        && e.details?.from_status === 'scheduled' && e.details?.to_status === 'arrived'));
     check('update event names the actor',
       mine.some((e) => e.details?.action === 'appointment_update'
         && e.details?.manager_email === 'tester@example.com'));

@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { User } from "firebase/auth";
 import {
   createAppointment,
+  createAppointmentSeries,
   deleteAppointment,
   isRoleRejection,
   listAppointmentCategories,
@@ -9,6 +10,7 @@ import {
   listAppointments,
   setAppointmentStatus,
   updateAppointment,
+  updateAppointmentSeries,
   type ApiAppointment,
   type AppointmentCategory,
   type AppointmentStatusInfo,
@@ -71,6 +73,43 @@ export function statusMeta(
 ): (typeof APPOINTMENT_STATUSES)[number] | undefined {
   return APPOINTMENT_STATUSES.find((s) => s.code === statusGroup(code));
 }
+
+// ---- Repeating visits: staggered phases (Jake, 2026-11-02) ----
+// A series is built from phases like 2x/week for 2 weeks, then
+// 1x/week for 1 week (a plan-of-care taper). Weeks are 7-day
+// blocks starting on the first visit's date; inside a block, a
+// k-times week lands on the FIRST k chosen weekdays of that
+// block. Each visit becomes its own appointment row server-side,
+// linked by a series id — one visit can move or cancel alone.
+export interface SeriesPhase {
+  perWeek: number;
+  weeks: number;
+}
+
+export function generateSeriesDays(
+  firstDay: Date,
+  weekdays: number[],
+  phases: SeriesPhase[],
+): Date[] {
+  const days: Date[] = [];
+  const wanted = new Set(weekdays);
+  let blockStart = new Date(firstDay);
+  blockStart.setHours(12, 0, 0, 0);
+  for (const phase of phases) {
+    for (let w = 0; w < phase.weeks; w++) {
+      const block: Date[] = [];
+      for (let i = 0; i < 7; i++) {
+        const d = addDays(blockStart, i);
+        if (wanted.has(d.getDay())) block.push(d);
+      }
+      days.push(...block.slice(0, Math.max(0, phase.perWeek)));
+      blockStart = addDays(blockStart, 7);
+    }
+  }
+  return days.slice(0, 60);
+}
+
+export const WEEKDAY_CHIPS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 
 // Compact day-row text for phone widths (Jake, 2026-11-02):
 // no status, no provider; the visit name abbreviated; the
@@ -192,6 +231,35 @@ export default function CalendarView({
   const [fRoom, setFRoom] = useState("");
   const [fNotes, setFNotes] = useState("");
   const [fStatus, setFStatus] = useState("scheduled");
+  // Simple entry card + series builder (Jake, 2026-11-02):
+  // creating starts on the compact card; "More options" (or
+  // editing) shows the full form.
+  const [formSimple, setFormSimple] = useState(true);
+  const [editScope, setEditScope] = useState<"single" | "series">(
+    "single",
+  );
+  const [repOn, setRepOn] = useState(false);
+  const [repWeekdays, setRepWeekdays] = useState<number[]>([1, 3, 5]);
+  const [repPhases, setRepPhases] = useState<SeriesPhase[]>([
+    { perWeek: 2, weeks: 2 },
+  ]);
+  const [deleteScope, setDeleteScope] = useState<
+    "single" | "series" | null
+  >(null);
+  // Drag-between-days state (2026-11-02).
+  const [dragOverDay, setDragOverDay] = useState<string | null>(null);
+  const dragRef = useRef<{
+    appt: ApiAppointment;
+    startX: number;
+    startY: number;
+    armed: boolean;
+    ghost: HTMLElement | null;
+    srcEl: HTMLElement;
+    overDay: string | null;
+    holdTimer: number | null;
+    pointerType: string;
+  } | null>(null);
+  const suppressClickRef = useRef(false);
   const [saving, setSaving] = useState(false);
 
   // Delete is role-gated (manager/admin): managers get a
@@ -199,6 +267,7 @@ export default function CalendarView({
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   useEffect(() => {
     setConfirmingDelete(false);
+    setDeleteScope(null);
   }, [selectedId]);
 
   const range = useMemo(() => {
@@ -449,6 +518,11 @@ export default function CalendarView({
     setFRoom("");
     setFNotes("");
     setFStatus("scheduled");
+    setFormSimple(true);
+    setEditScope("single");
+    setRepOn(false);
+    setRepWeekdays([1, 3, 5]);
+    setRepPhases([{ perWeek: 2, weeks: 2 }]);
     setFormOpen(true);
   }
 
@@ -474,8 +548,153 @@ export default function CalendarView({
     setFRoom(a.room ?? "");
     setFNotes(a.notes ?? "");
     setFStatus(statusGroup(a.status));
+    setFormSimple(false);
+    setEditScope("single");
+    setRepOn(false);
     setFormOpen(true);
   }
+
+  // ---- Drag between days (Jake, 2026-11-02) -----------------
+  // Pointer-events drag on month chips and week / 3-day blocks:
+  // a mouse drag arms after a few px; a touch drag arms on a
+  // short press-and-hold (so normal scrolling still works).
+  // The drop changes only the DATE — the time of day and the
+  // duration ride along — and saves through the ordinary
+  // ungated appointment update.
+  function cleanupDrag() {
+    const d = dragRef.current;
+    if (!d) return;
+    if (d.holdTimer) window.clearTimeout(d.holdTimer);
+    d.ghost?.remove();
+    d.srcEl.classList.remove("cal-drag-src");
+    dragRef.current = null;
+    setDragOverDay(null);
+  }
+
+  async function moveAppointment(a: ApiAppointment, targetKey: string) {
+    if (!user) return;
+    const start = new Date(a.starts_at);
+    const end = new Date(a.ends_at);
+    const [y, m, dd] = targetKey.split("-").map(Number);
+    const newStart = new Date(start);
+    newStart.setFullYear(y, m - 1, dd);
+    const newEnd = new Date(
+      newStart.getTime() + (end.getTime() - start.getTime()),
+    );
+    try {
+      const updated = await updateAppointment(user, a.id, {
+        starts_at: newStart.toISOString(),
+        ends_at: newEnd.toISOString(),
+      });
+      setAppts((prev) =>
+        prev.map((x) => (x.id === updated.id ? updated : x)),
+      );
+    } catch {
+      setNotice("Couldn't move that appointment — try again.");
+    }
+  }
+
+  function beginDrag(
+    e: React.PointerEvent,
+    a: ApiAppointment,
+    el: HTMLElement,
+  ) {
+    if (!apiConnected) return;
+    const d = {
+      appt: a,
+      startX: e.clientX,
+      startY: e.clientY,
+      armed: false,
+      ghost: null as HTMLElement | null,
+      srcEl: el,
+      overDay: null as string | null,
+      holdTimer: null as number | null,
+      pointerType: e.pointerType,
+    };
+    dragRef.current = d;
+    const positionGhost = (x: number, y: number) => {
+      if (!d.ghost) return;
+      d.ghost.style.left = `${x - d.ghost.offsetWidth / 2}px`;
+      d.ghost.style.top = `${y - 14}px`;
+    };
+    const arm = () => {
+      if (dragRef.current !== d || d.armed) return;
+      d.armed = true;
+      const g = el.cloneNode(true) as HTMLElement;
+      g.classList.add("cal-drag-ghost");
+      g.style.width = `${el.offsetWidth}px`;
+      document.body.appendChild(g);
+      d.ghost = g;
+      el.classList.add("cal-drag-src");
+      positionGhost(d.startX, d.startY);
+    };
+    if (e.pointerType === "touch") {
+      d.holdTimer = window.setTimeout(arm, 260);
+    }
+    const move = (ev: PointerEvent) => {
+      if (dragRef.current !== d) return;
+      const dist = Math.hypot(ev.clientX - d.startX, ev.clientY - d.startY);
+      if (!d.armed) {
+        if (d.pointerType !== "touch" && dist > 6) arm();
+        else if (d.pointerType === "touch" && dist > 10 && d.holdTimer) {
+          window.clearTimeout(d.holdTimer);
+          d.holdTimer = null;
+        }
+        return;
+      }
+      ev.preventDefault();
+      positionGhost(ev.clientX, ev.clientY);
+      const under = document.elementFromPoint(
+        ev.clientX,
+        ev.clientY,
+      ) as HTMLElement | null;
+      const cell = under?.closest?.("[data-day]") as HTMLElement | null;
+      const key = cell?.dataset.day ?? null;
+      d.overDay = key;
+      setDragOverDay(key);
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      const wasArmed = d.armed;
+      const target = d.overDay;
+      const appt = d.appt;
+      cleanupDrag();
+      if (wasArmed) {
+        suppressClickRef.current = true;
+        window.setTimeout(() => {
+          suppressClickRef.current = false;
+        }, 80);
+        if (target && target !== toDateInput(new Date(appt.starts_at))) {
+          void moveAppointment(appt, target);
+        }
+      }
+    };
+    window.addEventListener("pointermove", move, { passive: false });
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+  }
+
+  // ---- Series preview (dates the Repeats settings produce) ---
+  const seriesDays = useMemo(() => {
+    if (!repOn || !fDate) return [];
+    const base = new Date(`${fDate}T12:00:00`);
+    if (Number.isNaN(base.getTime())) return [];
+    return generateSeriesDays(base, repWeekdays, repPhases);
+  }, [repOn, fDate, repWeekdays, repPhases]);
+  const seriesStarts = useMemo(() => {
+    const [h, mi] = (fTime || "09:00").split(":").map(Number);
+    return seriesDays.map((d) => {
+      const s = new Date(d);
+      s.setHours(h || 0, mi || 0, 0, 0);
+      return s;
+    });
+  }, [seriesDays, fTime]);
+  const setPhase = (i: number, patch: Partial<SeriesPhase>) =>
+    setRepPhases((prev) =>
+      prev.map((x, j) => (j === i ? { ...x, ...patch } : x)),
+    );
 
   function buildInput() {
     const cat = catById(fCategory);
@@ -499,6 +718,42 @@ export default function CalendarView({
     setSaving(true);
     setNotice("");
     try {
+      // Series-wide edit: only the shared fields travel; dates
+      // and times stay per-visit by design.
+      if (editing && editScope === "series" && editing.series_id) {
+        const rows = await updateAppointmentSeries(
+          user,
+          editing.series_id,
+          {
+            category_id: fCategory,
+            provider_id: fProvider || null,
+            title: fTitle.trim() || undefined,
+            room: fRoom.trim() || null,
+            notes: fNotes.trim() || null,
+          },
+        );
+        setAppts((prev) =>
+          prev.map((a) => rows.find((r) => r.id === a.id) ?? a),
+        );
+        setFormOpen(false);
+        setNotice(`Saved changes to ${rows.length} series visits.`);
+        return;
+      }
+      // Series create: the server makes one row per visit under
+      // one series id, in a single transaction.
+      if (!editing && repOn && seriesStarts.length > 1) {
+        const out = await createAppointmentSeries(user, {
+          ...buildInput(),
+          duration_min: fDuration,
+          visits: seriesStarts.map((d) => d.toISOString()),
+        });
+        setRefreshTick((t) => t + 1);
+        setFormOpen(false);
+        setNotice(
+          `Created ${out.appointments.length} appointments in the series.`,
+        );
+        return;
+      }
       if (editing) {
         const updated = await updateAppointment(
           user,
@@ -529,16 +784,29 @@ export default function CalendarView({
     if (cat?.cattype === "appointment" && !fPatient)
       return setNotice("Pick a patient for this category.");
     if (!fDate || !fTime) return setNotice("Pick a date and start time.");
+    if (!editing && repOn) {
+      if (repWeekdays.length === 0)
+        return setNotice("Pick at least one visit day for the series.");
+      if (seriesStarts.length === 0)
+        return setNotice("The series settings produce no visits.");
+    }
     void doSave();
   }
 
   async function doDelete() {
     if (!selected) return;
     try {
-      await deleteAppointment(user, selected.id);
-      setAppts((prev) => prev.filter((a) => a.id !== selected.id));
+      if (deleteScope === "series" && selected.series_id) {
+        const sid = selected.series_id;
+        await deleteAppointment(user, selected.id, "series");
+        setAppts((prev) => prev.filter((a) => a.series_id !== sid));
+      } else {
+        await deleteAppointment(user, selected.id);
+        setAppts((prev) => prev.filter((a) => a.id !== selected.id));
+      }
       setSelectedId(null);
       setConfirmingDelete(false);
+      setDeleteScope(null);
     } catch (err) {
       setNotice(
         isRoleRejection(err)
@@ -564,8 +832,10 @@ export default function CalendarView({
       key={a.id}
       className={`cal-chip${a.status === "cancelled" || a.status === "no_show" || a.status === "missed" ? " cal-chip-muted" : ""}`}
       style={{ borderLeftColor: a.category_color }}
+      onPointerDown={(e) => beginDrag(e, a, e.currentTarget)}
       onClick={(e) => {
         e.stopPropagation();
+        if (suppressClickRef.current) return;
         setSelectedId(a.id);
         setSelectedDay(dayKey(new Date(a.starts_at)));
       }}
@@ -782,7 +1052,8 @@ export default function CalendarView({
                   return (
                     <div
                       key={dayKey(day)}
-                      className={`cal-cell${inMonth ? "" : " cal-out"}${isToday ? " cal-today" : ""}${selectedDay === dayKey(day) ? " cal-selected" : ""}`}
+                      className={`cal-cell${inMonth ? "" : " cal-out"}${isToday ? " cal-today" : ""}${selectedDay === dayKey(day) ? " cal-selected" : ""}${dragOverDay === toDateInput(day) ? " cal-drop" : ""}`}
+                      data-day={toDateInput(day)}
                       onClick={() => setSelectedDay(dayKey(day))}
                       onDoubleClick={() => openCreate(day)}
                     >
@@ -843,7 +1114,11 @@ export default function CalendarView({
                     +new Date(x.starts_at) - +new Date(y.starts_at),
                 );
                 return (
-                  <div key={dayKey(day)} className="cal-week-day">
+                  <div
+                    key={dayKey(day)}
+                    className={`cal-week-day${dragOverDay === toDateInput(day) ? " cal-drop" : ""}`}
+                    data-day={toDateInput(day)}
+                  >
                     <h3>
                       {day.toLocaleDateString([], { weekday: "short" })}{" "}
                       <span
@@ -864,13 +1139,20 @@ export default function CalendarView({
                           background: `${a.category_color}1f`,
                           borderLeftColor: a.category_color,
                         }}
-                        onClick={() => setSelectedId(a.id)}
+                        onPointerDown={(e) =>
+                          beginDrag(e, a, e.currentTarget)
+                        }
+                        onClick={() => {
+                          if (suppressClickRef.current) return;
+                          setSelectedId(a.id);
+                        }}
                       >
                         <strong>{fmtRange(a)}</strong>
                         <span>
                           {a.patient_name ?? a.title}
                         </span>
                         <span className="card-meta">
+                          {a.series_id ? "↻ " : ""}
                           {a.category_name}
                           {agencyNameFor(a) ? ` · ${agencyNameFor(a)}` : ""}
                         </span>
@@ -966,6 +1248,11 @@ export default function CalendarView({
                 >
                   {selected.category_name}
                 </span>
+                {selected.series_id && (
+                  <span className="kind-badge cal-series-badge">
+                    ↻ Series
+                  </span>
+                )}
               </div>
               <p>
                 {new Date(selected.starts_at).toLocaleDateString([], {
@@ -1020,17 +1307,45 @@ export default function CalendarView({
                   Edit
                 </button>
                 {isManager &&
-                  (confirmingDelete ? (
+                  (confirmingDelete &&
+                  selected.series_id &&
+                  deleteScope === null ? (
+                    <>
+                      <button
+                        className="btn btn-danger"
+                        onClick={() => setDeleteScope("single")}
+                      >
+                        Delete this visit
+                      </button>
+                      <button
+                        className="btn btn-danger"
+                        onClick={() => setDeleteScope("series")}
+                      >
+                        Delete whole series
+                      </button>
+                      <button
+                        className="btn"
+                        onClick={() => setConfirmingDelete(false)}
+                      >
+                        Keep
+                      </button>
+                    </>
+                  ) : confirmingDelete ? (
                     <>
                       <button
                         className="btn btn-danger"
                         onClick={() => void doDelete()}
                       >
-                        Confirm delete
+                        {deleteScope === "series"
+                          ? "Confirm: delete whole series"
+                          : "Confirm delete"}
                       </button>
                       <button
                         className="btn"
-                        onClick={() => setConfirmingDelete(false)}
+                        onClick={() => {
+                          setConfirmingDelete(false);
+                          setDeleteScope(null);
+                        }}
                       >
                         Keep
                       </button>
@@ -1050,7 +1365,166 @@ export default function CalendarView({
           {formOpen && (
             <article className="card cal-form">
               <h3>{editing ? "Edit appointment" : "New appointment"}</h3>
-              <div className="form-grid">
+              {editing?.series_id && (
+                <div className="cal-scope-row">
+                  <span>Part of a series — apply changes to:</span>
+                  <label>
+                    <input
+                      type="radio"
+                      name="edit-scope"
+                      checked={editScope === "single"}
+                      onChange={() => setEditScope("single")}
+                    />{" "}
+                    This visit only
+                  </label>
+                  <label>
+                    <input
+                      type="radio"
+                      name="edit-scope"
+                      checked={editScope === "series"}
+                      onChange={() => setEditScope("series")}
+                    />{" "}
+                    Whole series
+                  </label>
+                  {editScope === "series" && (
+                    <span className="cal-scope-note">
+                      Type, provider, title, room and notes change for
+                      every visit; dates and times stay per-visit.
+                    </span>
+                  )}
+                </div>
+              )}
+              {!editing && formSimple ? (
+                <div className="form-grid">
+                  {catById(fCategory)?.cattype !== "provider" && (
+                    <div className="form-field">
+                      <span>Patient</span>
+                      <div className="addr-wrap">
+                        <input
+                          type="text"
+                          value={fPatientQuery}
+                          placeholder="Type a patient name…"
+                          autoComplete="off"
+                          onFocus={() => setFPatientOpen(true)}
+                          onBlur={() =>
+                            window.setTimeout(
+                              () => setFPatientOpen(false),
+                              150,
+                            )
+                          }
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setFPatientQuery(v);
+                            setFPatientOpen(true);
+                            const sel = patients.find(
+                              (p) => p.id === fPatient,
+                            );
+                            if (sel && sel.name !== v) setFPatient("");
+                          }}
+                        />
+                        {fPatientOpen && (
+                          <div className="addr-drop" role="listbox">
+                            {patientChoices.length === 0 ? (
+                              <div className="addr-item addr-muted">
+                                No active patients match
+                              </div>
+                            ) : (
+                              patientChoices.map((pc) => (
+                                <div
+                                  key={pc.id}
+                                  className="addr-item"
+                                  role="option"
+                                  aria-selected={pc.id === fPatient}
+                                  onMouseDown={(e) => {
+                                    e.preventDefault();
+                                    setFPatient(pc.id);
+                                    setFPatientQuery(pc.name);
+                                    setFPatientOpen(false);
+                                  }}
+                                >
+                                  <span
+                                    className={`dot dot-${pc.zone}`}
+                                  />{" "}
+                                  {pc.name}
+                                  {(pc.patientStatus ?? "active") !==
+                                    "active" && " (not active)"}
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  <div className="form-field form-wide">
+                    <span>Visit type</span>
+                    <div className="cal-chiprow">
+                      {cats
+                        .filter((c) => c.cattype === "appointment")
+                        .map((c) => (
+                          <button
+                            type="button"
+                            key={c.id}
+                            className={`cal-chipbtn${String(c.id) === fCategory ? " on" : ""}`}
+                            style={{ borderColor: c.color }}
+                            onClick={() => {
+                              setFCategory(String(c.id));
+                              setFDuration(c.default_duration_min);
+                            }}
+                          >
+                            {c.name}
+                          </button>
+                        ))}
+                    </div>
+                  </div>
+                  <label>
+                    Provider
+                    <select
+                      value={fProvider}
+                      onChange={(e) => setFProvider(e.target.value)}
+                    >
+                      <option value="">Unassigned</option>
+                      {clinicians.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Date
+                    <input
+                      type="date"
+                      value={fDate}
+                      onChange={(e) => setFDate(e.target.value)}
+                    />
+                  </label>
+                  <label>
+                    Start time
+                    <input
+                      type="time"
+                      value={fTime}
+                      onChange={(e) => setFTime(e.target.value)}
+                    />
+                  </label>
+                  <label>
+                    Duration
+                    <select
+                      value={fDuration}
+                      onChange={(e) =>
+                        setFDuration(Number(e.target.value))
+                      }
+                    >
+                      {[15, 30, 45, 60, 90, 120].map((m) => (
+                        <option key={m} value={m}>
+                          {m} min
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              ) : (
+                <div className="form-grid">
                 {catById(fCategory)?.cattype !== "provider" && (
                   <div className="form-field">
                     <span>Patient</span>
@@ -1225,6 +1699,139 @@ export default function CalendarView({
                   />
                 </label>
               </div>
+              )}
+              {!editing && (
+                <div className="cal-repeats">
+                  <label className="cal-repeats-toggle">
+                    <input
+                      type="checkbox"
+                      checked={repOn}
+                      onChange={(e) => setRepOn(e.target.checked)}
+                    />{" "}
+                    Repeats — build a series of visits
+                  </label>
+                  {repOn && (
+                    <>
+                      <div className="cal-repeats-days">
+                        <span>Visit days</span>
+                        <div className="cal-chiprow">
+                          {WEEKDAY_CHIPS.map((label, d) => (
+                            <button
+                              type="button"
+                              key={d}
+                              className={`cal-chipbtn${repWeekdays.includes(d) ? " on" : ""}`}
+                              onClick={() =>
+                                setRepWeekdays((prev) =>
+                                  prev.includes(d)
+                                    ? prev.filter((x) => x !== d)
+                                    : [...prev, d].sort((a, b) => a - b),
+                                )
+                              }
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      {repPhases.map((ph, i) => {
+                        const startWeek =
+                          repPhases
+                            .slice(0, i)
+                            .reduce((n, x) => n + x.weeks, 0) + 1;
+                        const endWeek = startWeek + ph.weeks - 1;
+                        return (
+                          <div className="cal-phase" key={i}>
+                            <span className="cal-phase-label">
+                              {ph.weeks === 1
+                                ? `Week ${startWeek}`
+                                : `Weeks ${startWeek}–${endWeek}`}
+                            </span>
+                            <span className="cal-stepper">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setPhase(i, {
+                                    perWeek: Math.max(1, ph.perWeek - 1),
+                                  })
+                                }
+                              >
+                                −
+                              </button>
+                              <strong>{ph.perWeek}×</strong>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setPhase(i, {
+                                    perWeek: Math.min(5, ph.perWeek + 1),
+                                  })
+                                }
+                              >
+                                +
+                              </button>
+                            </span>
+                            <span>/ week for</span>
+                            <span className="cal-stepper">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setPhase(i, {
+                                    weeks: Math.max(1, ph.weeks - 1),
+                                  })
+                                }
+                              >
+                                −
+                              </button>
+                              <strong>{ph.weeks} wk</strong>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setPhase(i, {
+                                    weeks: Math.min(12, ph.weeks + 1),
+                                  })
+                                }
+                              >
+                                +
+                              </button>
+                            </span>
+                            {repPhases.length > 1 && (
+                              <button
+                                type="button"
+                                className="cal-phase-remove"
+                                onClick={() =>
+                                  setRepPhases((prev) =>
+                                    prev.filter((_, j) => j !== i),
+                                  )
+                                }
+                              >
+                                Remove
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                      {repPhases.length < 6 && (
+                        <button
+                          type="button"
+                          className="btn btn-small"
+                          onClick={() =>
+                            setRepPhases((prev) => [
+                              ...prev,
+                              { perWeek: 1, weeks: 1 },
+                            ])
+                          }
+                        >
+                          + Add phase
+                        </button>
+                      )}
+                      <p className="cal-repeats-preview">
+                        {seriesStarts.length === 0
+                          ? "Pick a date and at least one visit day."
+                          : `${seriesStarts.length} visits · ${seriesStarts[0].toLocaleDateString([], { month: "short", day: "numeric" })} – ${seriesStarts[seriesStarts.length - 1].toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })} · every visit is its own appointment — one can move or cancel alone`}
+                      </p>
+                    </>
+                  )}
+                </div>
+              )}
               <div className="cal-detail-actions">
                 <button
                   className="btn btn-primary"
@@ -1235,8 +1842,18 @@ export default function CalendarView({
                     ? "Saving…"
                     : editing
                       ? "Save changes"
-                      : "Book appointment"}
+                      : repOn && seriesStarts.length > 1
+                        ? `Book ${seriesStarts.length} appointments`
+                        : "Book appointment"}
                 </button>
+                {!editing && (
+                  <button
+                    className="btn"
+                    onClick={() => setFormSimple((v) => !v)}
+                  >
+                    {formSimple ? "More options" : "Fewer options"}
+                  </button>
+                )}
                 <button
                   className="btn"
                   onClick={() => setFormOpen(false)}

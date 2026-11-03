@@ -58,9 +58,26 @@ if (allowedOrigins.length === 0) {
     'DASHBOARD_ORIGIN is unset: CORS is off and dashboard browser calls will be blocked. Set DASHBOARD_ORIGIN to the dashboard origin to enable it.',
   );
 } else {
+  // Per-deployment preview origins of the dashboard project
+  // (https://<hash>.marcinnotech-app.pages.dev) are allowed too
+  // (Jake-approved widening, 2026-11-02) so a preview build can
+  // be checked against the live API before it goes canonical.
+  // The main origin still comes from DASHBOARD_ORIGIN.
+  const previewOrigin =
+    /^https:\/\/[a-z0-9-]+\.marcinnotech-app\.pages\.dev$/;
   app.use(
     cors({
-      origin: allowedOrigins,
+      origin: (origin, cb) => {
+        if (
+          !origin ||
+          allowedOrigins.includes(origin) ||
+          previewOrigin.test(origin)
+        ) {
+          cb(null, true);
+        } else {
+          cb(new Error('CORS origin not allowed'));
+        }
+      },
       methods: ['GET', 'POST', 'PUT', 'DELETE'],
       allowedHeaders: ['Content-Type', 'Authorization', 'X-Manager-Pin'],
     }),
