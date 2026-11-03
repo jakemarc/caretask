@@ -6,6 +6,22 @@ built and verified but not deployed.
 
 ## 2026-11-03
 
+- **Phone contacts enable hotfix — LIVE as deploy-37,
+  2026-11-03.** Jake's pilot found Turn on phone sync
+  returning 500. Root cause (API journal + Radicale journal
+  line up to the second): `lib/contactSync.js` restarted
+  Radicale (sudo systemctl reload-or-restart) immediately
+  after writing the htpasswd file, and the next DAV call
+  (ensureBook) raced the restart — ECONNREFUSED on
+  127.0.0.1:5232. The restart was never needed: Radicale
+  re-reads htpasswd on every request (the local suite proves
+  a regenerated password works immediately). Fix: the
+  restart hook is removed from the htpasswd write path, and
+  the now-unused `CARDDAV_HTPASSWD_RELOAD` env line was
+  removed on the VM (the sudoers rule remains, unused).
+  API-only deploy (backups `.bak-2026-11-03-deploy37`);
+  health green locally + publicly after restart. Local
+  suite re-run against the fixed code: 35/35 green.
 - **Phone contacts sync (CardDAV) — LIVE as deploy-36,
   2026-11-03.** Spec:
   `carddav-contacts-sync-spec.md` (Jake chose live sync over a
