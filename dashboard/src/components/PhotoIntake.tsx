@@ -1,14 +1,23 @@
 import { useEffect, useRef, useState } from "react";
 import type { ContactCandidate } from "../lib/googleContacts";
-import { parseIntakeText, type ExtractedIntake } from "../lib/photoExtract";
+import {
+  parseIntakeOcr,
+  type ExtractedIntake,
+  type OcrWord,
+} from "../lib/photoExtract";
 
 // Add Patient by photo (Jake, 2026-11-02 — he chose the FREE
 // on-device reader). The photo is read with Tesseract.js, which
 // runs entirely in the browser on this device: the image never
 // leaves the phone, is never uploaded, and is discarded when the
 // panel closes. (The OCR engine and its English data download
-// once from a CDN — that's program code, not the photo.) The
-// extracted fields land in the regular Add Patient form via
+// once from a CDN — that's program code, not the photo.) Before
+// reading, the image is cleaned up on a canvas (scaled toward a
+// readable size, grayscale + contrast) — still on-device. The
+// reader also returns word positions, and the parser uses them
+// to read column by column and skip non-patient blocks (an
+// agency-information column no longer fills patient fields).
+// The extracted fields land in the regular Add Patient form via
 // onApply, where they are reviewed and edited before saving;
 // nothing saves from here.
 
@@ -25,6 +34,7 @@ export default function PhotoIntake({ onApply, onClose }: Props) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [result, setResult] = useState<ExtractedIntake | null>(null);
   const [rawText, setRawText] = useState("");
+  const [quality, setQuality] = useState<number | null>(null);
   const [error, setError] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -34,6 +44,33 @@ export default function PhotoIntake({ onApply, onClose }: Props) {
     };
   }, [previewUrl]);
 
+  // Clean the photo up for the reader: draw it to a canvas at a
+  // readable size (long edge toward ~2200px, never more than
+  // 2.5× upscale) in grayscale with a contrast lift. All local.
+  async function prepareImage(file: File): Promise<HTMLCanvasElement | File> {
+    try {
+      const bmp = await createImageBitmap(file);
+      const longEdge = Math.max(bmp.width, bmp.height);
+      const scale = Math.min(2.5, Math.max(0.5, 2200 / longEdge));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(bmp.width * scale);
+      canvas.height = Math.round(bmp.height * scale);
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return file;
+      try {
+        ctx.filter = "grayscale(1) contrast(1.12)";
+      } catch {
+        // Older browsers ignore an unsupported filter — the
+        // scaled copy is still worth reading.
+      }
+      ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+      bmp.close();
+      return canvas;
+    } catch {
+      return file;
+    }
+  }
+
   async function readPhoto(file: File) {
     if (previewUrl) URL.revokeObjectURL(previewUrl);
     setPreviewUrl(URL.createObjectURL(file));
@@ -41,6 +78,7 @@ export default function PhotoIntake({ onApply, onClose }: Props) {
     setProgress(0);
     setError("");
     setResult(null);
+    setQuality(null);
     try {
       const { createWorker, OEM } = await import("tesseract.js");
       const worker = await createWorker("eng", OEM.LSTM_ONLY, {
@@ -51,9 +89,26 @@ export default function PhotoIntake({ onApply, onClose }: Props) {
         },
       });
       try {
-        const { data } = await worker.recognize(file);
+        const image = await prepareImage(file);
+        const { data } = await worker.recognize(image, {}, {
+          text: true,
+          blocks: true,
+        });
+        const words: OcrWord[] = [];
+        for (const b of data.blocks ?? [])
+          for (const p of b.paragraphs)
+            for (const l of p.lines)
+              for (const w of l.words)
+                words.push({
+                  text: w.text,
+                  x0: w.bbox.x0,
+                  y0: w.bbox.y0,
+                  x1: w.bbox.x1,
+                  y1: w.bbox.y1,
+                });
         setRawText(data.text);
-        setResult(parseIntakeText(data.text));
+        setQuality(Math.round(data.confidence));
+        setResult(parseIntakeOcr({ text: data.text, words }));
         setPhase("done");
       } finally {
         await worker.terminate();
@@ -134,6 +189,13 @@ export default function PhotoIntake({ onApply, onClose }: Props) {
       {phase === "error" && <p className="pin-error">{error}</p>}
       {phase === "done" && result && (
         <div className="photo-intake-result">
+          {quality !== null && quality < 75 && (
+            <p className="section-note">
+              Read quality was low on that photo — a straighter,
+              closer, brighter shot (or the printed sheet itself)
+              usually reads much better.
+            </p>
+          )}
           {summary.length > 0 ? (
             <>
               <p className="card-meta">

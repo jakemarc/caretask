@@ -6,6 +6,40 @@ built and verified but not deployed.
 
 ## 2026-11-02
 
+- **Calendar + intake batch — Live 2026-11-02 (deploy-31:
+  dashboard bundle `index-BY1uCmzT.js`, deployment
+  https://f6cf702c.marcinnotech-app.pages.dev, canonical
+  `f6cf702c-05ce-4dfb-94a6-910b7c48f85e`; API = data-only
+  status migration on the live DB, no restart; verified —
+  canonical matches, deployment URL serves the new bundle,
+  main-domain asset 200, /health green, migration post-state
+  read back from the VM).** Six pieces from Jake's Nov 2
+  afternoon spec run: (1) the appointment form's Patient field
+  is a text box with autocomplete over ACTIVE patients (zone
+  dots; the current patient stays listed when editing a
+  since-discharged one); (2) Add-by-photo parser v2 —
+  word-position layout pass (columns read in order,
+  agency-information blocks excluded, wrapped values
+  stitched, fax barred from phone slots, quoted nicknames and
+  toolbar words handled), canvas image cleanup, low-confidence
+  note — still free and on-device, per Jake's pick over a
+  cloud vision model; (3) booking defaults — Patient is the
+  first field, category defaults to Revisit, provider defaults
+  to the signed-in clinician; (4) navigation split — the
+  sidebar Appointment button opens a fresh booking form (new
+  CalendarPlus entry + one-shot intent), a separate Calendar
+  button opens the page, whose view toggle is now Day /
+  3 Day / Week / Month / Map (3 Day = 3 day-columns from the
+  anchor day); (5) appointment statuses collapse to three —
+  Scheduled (yellow) / Completed (green) / Missed (red) — as
+  pills in the day lists and the only choices in the form and
+  detail selects, with the API migration remapping stored
+  rows (see API.md); (6) mobile day rows go compact — no
+  status, no provider, visit names abbreviated (Jake's codes:
+  I.E., SOC, ROC, RE, DDC, ADC, ODC), patients as Last, F.
+  with last names over 8 letters cut to 4. Jake's signed-in
+  phone check of the batch is the remaining verification.
+
 - **Provider-picker hotfix — Live 2026-11-02 (deploy-30:
   dashboard-only, bundle `index-sXq1oXPP.js`, deployment
   https://c4110435.marcinnotech-app.pages.dev, verified —

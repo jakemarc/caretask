@@ -67,7 +67,7 @@ CREATE TABLE IF NOT EXISTS appointments (
   title       TEXT NOT NULL DEFAULT 'Visit',
   starts_at   TIMESTAMPTZ NOT NULL,
   ends_at     TIMESTAMPTZ NOT NULL,
-  status      TEXT NOT NULL DEFAULT 'booked'
+  status      TEXT NOT NULL DEFAULT 'scheduled'
               REFERENCES appointment_statuses(code),
   room        TEXT,
   notes       TEXT,
