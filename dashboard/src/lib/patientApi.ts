@@ -1992,3 +1992,56 @@ export async function acceptInvite(
   })) as { staff: ApiUser };
   return out.staff;
 }
+
+// ---------------------------------------------------------------------------
+// Phone contacts sync (CardDAV) — per-clinician self-service.
+// The password is returned ONCE by enable / regenerate and is
+// never stored in the API database. See
+// carddav-contacts-sync-spec.md.
+// ---------------------------------------------------------------------------
+
+export interface ContactSyncStatus {
+  configured: boolean;
+  enabled: boolean;
+  dav_username: string | null;
+  server_url: string;
+  book_name: string;
+  last_sync_at: string | null;
+  last_result: string | null;
+  contact_count: number;
+}
+
+export interface ContactSyncCredentials {
+  dav_username: string;
+  password: string;
+  server_url?: string;
+  book_name?: string;
+  sync?: { created?: number; updated?: number; deleted?: number; total?: number; error?: string; skipped?: string };
+}
+
+export async function fetchContactSync(user: User): Promise<ContactSyncStatus> {
+  return (await apiFetch(user, "/contact-sync/me")) as ContactSyncStatus;
+}
+
+export async function enableContactSync(user: User): Promise<ContactSyncCredentials> {
+  return (await apiFetch(user, "/contact-sync/me/enable", {
+    method: "POST",
+  })) as ContactSyncCredentials;
+}
+
+export async function regenerateContactSyncPassword(user: User): Promise<ContactSyncCredentials> {
+  return (await apiFetch(user, "/contact-sync/me/regenerate-password", {
+    method: "POST",
+  })) as ContactSyncCredentials;
+}
+
+export async function syncContactsNow(user: User): Promise<ContactSyncCredentials["sync"]> {
+  const out = (await apiFetch(user, "/contact-sync/me/sync-now", {
+    method: "POST",
+  })) as { sync: ContactSyncCredentials["sync"] };
+  return out.sync;
+}
+
+export async function disableContactSync(user: User): Promise<void> {
+  await apiFetch(user, "/contact-sync/me", { method: "DELETE" });
+}

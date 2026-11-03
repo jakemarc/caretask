@@ -333,6 +333,16 @@ the `event_log` CHECK with the platform event types).
 - `appointments.episode_id` — UUID FK → patient_episodes, ON
   DELETE SET NULL. Stamped by the booking gate; pre-platform
   rows keep NULL until the platform migration stamps them.
+- `user_contact_sync` — phone contacts sync (Local 2026-11-03,
+  `schema-contact-sync.sql`): one row per clinician — opaque
+  `dav_username` (`u<user_id>`), enabled flag, `book_path` on
+  our Radicale server, last sync time + result. The CardDAV
+  password is NOT stored here (bcrypt hash in Radicale's
+  htpasswd only).
+- `contact_sync_items` — PK (user_id, patient_id): the DAV
+  href + etag + a content hash over exactly the synced fields
+  (name, phones, email, address) for drift detection. Sync
+  events (`contact_sync`) carry ids and counts only.
 
 ## audit_log (patient change history)
 

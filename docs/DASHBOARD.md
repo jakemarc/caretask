@@ -848,6 +848,16 @@ exactly like the other API panels.
   other roles never render it): create by email + role, the
   acceptance link is shown ONCE with a Copy button (the raw
   code is never stored), list with derived status + Revoke.
+- **Phone contacts card** (Local 2026-11-03,
+  `src/components/PhoneContactsSettings.tsx`, Settings after
+  Invites): mirrors the clinician's Active list into a phone
+  address book named "CareTask" on our CardDAV server. Enable
+  shows the CardDAV server / username / password ONCE (with
+  the iPhone Add CardDAV Account steps), then the card shows
+  contact count + last sync, with Sync now, New password
+  (also shown once), and a two-step Turn off. When the server
+  env is unconfigured the card says so instead of offering
+  enable.
 
 ## Calendar chrome (Live 2026-11-03, deploy-33)
 

@@ -95,6 +95,7 @@ import AgencyPicker from "../components/AgencyPicker";
 import AgencyDirectorySettings from "../components/AgencyDirectorySettings";
 import CsvImport from "../components/CsvImport";
 import { InvitesCard, MyAgenciesCard } from "../components/PlatformSettings";
+import { PhoneContactsCard } from "../components/PhoneContactsSettings";
 import EpisodeCard from "../components/EpisodeCard";
 import type { ContactCandidate } from "../lib/googleContacts";
 import {
@@ -4697,6 +4698,10 @@ export default function Dashboard({
                   apiConnected={apiStatus === "connected"}
                 />
                 <InvitesCard
+                  user={user}
+                  apiConnected={apiStatus === "connected"}
+                />
+                <PhoneContactsCard
                   user={user}
                   apiConnected={apiStatus === "connected"}
                 />

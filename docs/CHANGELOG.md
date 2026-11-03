@@ -6,6 +6,32 @@ built and verified but not deployed.
 
 ## 2026-11-03
 
+- **Phone contacts sync (CardDAV) — Local 2026-11-03 (built +
+  verified, deploy in flight as deploy-36).** Spec:
+  `carddav-contacts-sync-spec.md` (Jake chose live sync over a
+  vCard export, the list name "CareTask", and the CardDAV route
+  over Google Contacts — not BAA-covered). A per-clinician
+  address book named **CareTask** on our own Radicale server,
+  mirroring the clinician's **Active** list one-way: name,
+  phones, email, address only — nothing clinical. API:
+  `schema-contact-sync.sql` (user_contact_sync +
+  contact_sync_items; event type `contact_sync`, ids/counts
+  only), `lib/vcard.js` (vCard 3.0 builder + content hash over
+  exactly the synced fields), `lib/contactSync.js` (DAV client,
+  reconcile — on-change pokes from patients/links/merge/users
+  + hourly pass; htpasswd credential management, bcrypt),
+  `routes/contactSync.js` (/contact-sync/me: status, enable —
+  password returned once — regenerate, sync-now, disable with
+  full server-side teardown). The phone credential is
+  READ-ONLY (Radicale rights file); the API writes as a
+  service user. Dashboard: Settings → **Phone contacts** card
+  (enable, one-time credential display with the iPhone CardDAV
+  steps, Sync now, regenerate, turn off). Verified locally
+  against a REAL Radicale 3.9 + scratch Postgres: 35-check
+  suite green (actives-only population, read-only enforcement,
+  status flips, regeneration effective immediately, teardown);
+  regressions green: platform 90, patients, users, users-mgmt,
+  patient-merge.
 - **Multi-user platform — LIVE as deploy-35, 2026-11-03.**
   (Built + verified locally first; Jake reviewed the migration
   walkthrough, then said deploy.) Jake's design, informed by same-day model
