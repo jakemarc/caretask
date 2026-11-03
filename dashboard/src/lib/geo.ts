@@ -32,6 +32,10 @@ export interface MapPatientLike {
   // calendar agency badges/filter, 2026-11-02).
   agencyId?: number | null;
   agencyName?: string | null;
+  // Enrollment status (active | hold | discharged) — the
+  // appointment form's patient picker offers ACTIVE patients
+  // only (2026-11-02).
+  patientStatus?: string | null;
 }
 
 export interface PlacedPoint {
@@ -68,6 +72,7 @@ export function toMapPatient(p: PersonUnderCare): MapPatientLike {
     longitude: p.longitude,
     agencyId: p.agencyId ?? null,
     agencyName: p.agencyName ?? p.agencyNameText ?? null,
+    patientStatus: p.patientStatus ?? "active",
   };
 }
 

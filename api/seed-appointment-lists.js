@@ -24,13 +24,20 @@ const CATEGORIES = [
 
 const STATUSES = [
   // [code, label, color, is_checkin, is_checkout, sort_order]
-  ['booked', 'Booked', '#2563eb', false, false, 1],
-  ['confirmed', 'Confirmed', '#0891b2', false, false, 2],
-  ['arrived', 'Arrived', '#16a34a', true, false, 3],
-  ['in_room', 'In Room', '#d97706', false, false, 4],
-  ['checked_out', 'Checked Out', '#7c3aed', false, true, 5],
-  ['cancelled', 'Cancelled', '#dc2626', false, false, 6],
-  ['no_show', 'No Show', '#475569', false, false, 7],
+  // Jake's three (2026-11-02): Scheduled yellow, Completed
+  // green, Missed red. The legacy flow-board codes stay seeded
+  // (history may reference them) but sort below the big three;
+  // schema-appointment-statuses-v2.sql does the same on live DBs.
+  ['scheduled', 'Scheduled', '#d97706', false, false, 1],
+  ['completed', 'Completed', '#16a34a', false, true, 2],
+  ['missed', 'Missed', '#dc2626', false, false, 3],
+  ['booked', 'Booked', '#2563eb', false, false, 11],
+  ['confirmed', 'Confirmed', '#0891b2', false, false, 12],
+  ['arrived', 'Arrived', '#16a34a', true, false, 13],
+  ['in_room', 'In Room', '#d97706', false, false, 14],
+  ['checked_out', 'Checked Out', '#7c3aed', false, true, 15],
+  ['cancelled', 'Cancelled', '#dc2626', false, false, 16],
+  ['no_show', 'No Show', '#475569', false, false, 17],
 ];
 
 async function main() {

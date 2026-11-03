@@ -739,6 +739,62 @@ Rows save with their agency_id / agency_name_text / status —
 createPatient already accepted all three, so this is
 dashboard-only. Staff import is unchanged.
 
+## Appointment form: patient autocomplete (Live 2026-11-02, deploy-31)
+
+At Jake's direction the form's Patient dropdown is now a
+**text box with autocomplete**: type to filter, tap to pick,
+with the zone dot shown per row. Only **active** patients are
+offered (status now rides on `MapPatientLike.patientStatus`
+via `toMapPatient`); when editing, the appointment's current
+patient stays listed even if since discharged (marked "not
+active"). Typing over a picked name un-picks it, so the form
+can only save a real selection ("Pick a patient for this
+category" still guards the save). The picker is a div-based
+field, not a `<label>` (deploy-14 tap lesson), reusing the
+`.addr-*` suggestion styles.
+
+**Mobile day rows (Jake, 2026-11-02; same build):** in the
+Day list and the month view's day list, phone widths (unless
+desktop view is forced) swap each row to a compact line: NO
+status pill, NO provider, the visit name abbreviated
+(`shortCategoryName`: I.E. / SOC / ROC / RE / DDC /
+ADC / ODC — Jake's codes — generic shortening otherwise),
+and the patient as **Last, F.** with a last name longer than
+8 letters cut to its first 4 (`compactPatientName`). Desktop
+rows are unchanged.
+
+**Statuses (Jake, 2026-11-02; same build):** appointments now
+carry exactly three statuses — **Scheduled** (yellow pill),
+**Completed** (green), **Missed** (red) — rendered as
+`.cal-status` pills in the lists and offered by both the form
+and detail-card selects. Legacy codes group for display
+(booked/confirmed/arrived/in_room → Scheduled, checked_out →
+Completed, no_show → Missed; cancelled keeps its gray pill)
+and are canonicalized when an appointment is opened for edit;
+the overview's today-count excludes missed alongside
+cancelled/no_show. API side: see API.md "Status model v2".
+
+**Navigation + views (Jake, 2026-11-02; same build):** the
+sidebar/menu now has TWO entries — **Appointment** (an action:
+opens the calendar page with a fresh booking form, via a
+one-shot intent Dashboard passes to CalendarView; the form
+starts at the next whole hour within 8–17, else tomorrow 9 AM)
+and **Calendar** (the page; its h1 and the mobile topbar title
+agree). The page opens on the **Day** list as before; the view
+toggle is now **Day / 3 Day / Week / Month / Map** — 3 Day
+reuses the Week column layout with three day columns starting
+at the anchor day (arrows step 3 days; on phones it stays
+3-across, unlike Week which stacks).
+
+**Form order + defaults (Jake, 2026-11-02; same build):** the
+Patient box is now the FIRST field in the form; the category
+defaults to **Revisit** (its 45-minute default duration comes
+with it); the provider defaults to the **signed-in clinician**
+(Dashboard passes its `useMyStaff` record as
+`defaultProviderId`; applied only when that person is an
+active, authorized provider). Editing an existing appointment
+keeps its saved values — defaults apply to new bookings only.
+
 ## Calendar: agency badges + filter (Live 2026-11-02, deploy-28)
 
 Appointments carry no agency of their own — they inherit it
@@ -802,7 +858,10 @@ does not include PTs.
 
 ## Add patient by photo (Live 2026-11-02, deploy-28)
 
-Jake chose the FREE on-device reader (cloud vision not used).
+Jake chose the FREE on-device reader (cloud vision not used;
+on 2026-11-02 he was offered a cloud vision model and a hybrid
+and chose **smarter on-device parsing** instead — the v2 parser
+below; LIVE 2026-11-02 as deploy-31).
 Add Patient gains an **Add by photo** button →
 `PhotoIntake` (src/components/PhotoIntake.tsx): camera/file pick
 (`capture="environment"`), Tesseract.js (lazy chunk) reads the
@@ -818,6 +877,28 @@ the existing `applyContactToPatientForm` — the normal duplicate
 check runs and nothing saves from the photo panel itself.
 Parser verified against a labeled referral sample (all fields
 exact; the recent referral date is not mistaken for the DOB).
+
+**v2 layout-aware parsing (Live 2026-11-02, deploy-31):** the
+reader now also returns word positions (`blocks` output) and
+the photo is cleaned on a canvas first (scaled toward ~2200px,
+grayscale + contrast). `parseIntakeOcr` regroups words into
+rows, splits rows at the column gutter, reads column by
+column, and **drops every segment under an "Agency
+Information" heading** before extraction; wrapped values
+(phones split mid-number, street suffix on the next line,
+ZIP on its own line) are stitched back together, fax lines
+never feed the phone slots, quoted nicknames no longer break
+name parsing, and screen-toolbar words are rejected as name
+candidates. The panel shows a **read-quality note** when the
+engine's confidence is low. Verified three ways: the labeled
+referral sample stays exact; a synthetic clean two-column
+HCHB-style read extracts every patient field exactly with
+zero agency contamination; Jake's real HCHB screen photo now
+yields the correct cell and NO agency phone/address (v1 had
+filled both, wrong) — its DOB/address remain unread because
+the engine never read those characters through the glare,
+which no parser can recover (the quality note tells the user
+to retake straighter/brighter).
 
 ## Add Patient form cleanup + desktop patients table (Live 2026-11-02, deploy-28)
 

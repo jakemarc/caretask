@@ -2253,6 +2253,9 @@ label.contact-picker-row {
   grid-template-columns: repeat(7, 1fr);
   gap: 10px;
 }
+.cal-week.cal-week-3 {
+  grid-template-columns: repeat(3, 1fr);
+}
 .cal-week-day {
   background: var(--panel);
   border: 1px solid var(--border);
@@ -2321,6 +2324,15 @@ label.contact-picker-row {
   gap: 12px;
 }
 .cal-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+/* Non-label twin of the rule above, for the patient autocomplete
+   (its suggestion rows must not sit inside a <label>). */
+.cal-form .form-field {
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -4694,4 +4706,50 @@ label.contact-picker-row {
   background: var(--panel);
   z-index: 2;
   box-shadow: 0 1px 0 var(--border);
+}
+
+/* Appointment status pills (Jake, 2026-11-02): Scheduled
+   yellow, Completed green, Missed red; anything else (e.g.
+   Cancelled) sits in muted gray. Zone/status hues only —
+   never themed. */
+.cal-status {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 0 7px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.5;
+  vertical-align: 1px;
+}
+.cal-status-amber {
+  background: #fef3c7;
+  color: #92400e;
+}
+.cal-status-green {
+  background: #dcfce7;
+  color: #166534;
+}
+.cal-status-red {
+  background: #fee2e2;
+  color: #991b1b;
+}
+.cal-status-gray {
+  background: var(--panel-2);
+  color: var(--muted);
+}
+
+/* Compact day rows on phones (Jake, 2026-11-02): at phone
+   widths (unless desktop view is forced) the compact line —
+   last-name-first patient, abbreviated visit, no status, no
+   provider — replaces the full line in the day lists. */
+.cal-day-compact {
+  display: none;
+}
+@media (max-width: 720px) {
+  .app-shell:not(.force-desktop) .cal-day-full {
+    display: none;
+  }
+  .app-shell:not(.force-desktop) .cal-day-compact {
+    display: inline;
+  }
 }

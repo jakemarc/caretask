@@ -13,6 +13,7 @@ import {
   Building2,
   CalendarCheck,
   CalendarDays,
+  CalendarPlus,
   ChevronsLeft,
   ChevronsRight,
   ClipboardCheck,
@@ -425,6 +426,11 @@ export default function Dashboard({
 }) {
   const navigate = useNavigate();
   const [tab, setTab] = useState<Tab>("dashboard");
+  // One-shot intent for the calendar page: the sidebar
+  // Appointment button sets "create" so CalendarView opens a
+  // fresh booking form on arrival, then clears it (Jake,
+  // 2026-11-02). The Calendar button passes no intent.
+  const [calIntent, setCalIntent] = useState<"create" | null>(null);
   const [flags, setFlags] = useState<Flag[]>(initialFlags);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [forceDesktop, setForceDesktop] = useState(false);
@@ -502,7 +508,8 @@ export default function Dashboard({
               (a) =>
                 a.cattype === "appointment" &&
                 a.status !== "cancelled" &&
-                a.status !== "no_show",
+                a.status !== "no_show" &&
+                a.status !== "missed",
             ).length,
           );
         }
@@ -1987,13 +1994,27 @@ export default function Dashboard({
               <span className="nav-icon"><Users size={20} /></span>
               <span className="nav-label">Patients</span>
             </button>
+            {/* Appointment is an ACTION (Jake, 2026-11-02): it
+                opens the calendar page with a fresh booking form.
+                Calendar is the page itself. */}
+            <button
+              className="nav-btn"
+              onClick={() => {
+                setTab("appointment");
+                setCalIntent("create");
+              }}
+              title="Appointment"
+            >
+              <span className="nav-icon"><CalendarPlus size={20} /></span>
+              <span className="nav-label">Appointment</span>
+            </button>
             <button
               className={tab === "appointment" ? "nav-btn active" : "nav-btn"}
               onClick={() => setTab("appointment")}
-              title="Appointment"
+              title="Calendar"
             >
               <span className="nav-icon"><CalendarDays size={20} /></span>
-              <span className="nav-label">Appointment</span>
+              <span className="nav-label">Calendar</span>
             </button>
             <button
               className={tab === "messages" ? "nav-btn active" : "nav-btn"}
@@ -3864,6 +3885,11 @@ export default function Dashboard({
                   id: String(s.id),
                   name: `${s.fname} ${s.lname}`,
                 }))}
+              defaultProviderId={
+                me && me.active && me.authorized ? String(me.id) : ""
+              }
+              intent={calIntent}
+              onIntentHandled={() => setCalIntent(null)}
               onOpenPatient={(id) => {
                 setSelectedId(id);
                 setTab("profile");

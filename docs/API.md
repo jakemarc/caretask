@@ -367,6 +367,17 @@ carry ids and doc_type only — never title or section content.
   facility table yet). Categories are editable in Settings →
   Visit categories (role-gated); statuses are still seeded data
   only (`seed-appointment-lists.js`), no admin UI.
+  **Status model v2 (Jake, 2026-11-02; LIVE as deploy-31 —
+  migration run on the live DB and verified: 13 scheduled /
+  2 completed / 1 missed / 1 cancelled of 17 appointments):**
+  exactly three user-facing statuses — `scheduled` (yellow),
+  `completed` (green), `missed` (red) — via
+  `schema-appointment-statuses-v2.sql`, which adds the three
+  codes (sort 1–3), pushes the legacy flow-board codes to sort
+  11–17 (rows kept for history), remaps stored appointments
+  (booked/confirmed/arrived/in_room → scheduled, checked_out →
+  completed, no_show → missed, cancelled untouched), and sets
+  the column default to 'scheduled'.
 - Documents: clinical documentation v1 is LIVE (deployed
   2026-10-30 in the maps + agency round). Templates are fixed in code
   (`lib/documentTemplates.js`) — there is no template-builder UI
