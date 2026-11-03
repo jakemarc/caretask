@@ -848,7 +848,7 @@ exactly like the other API panels.
   other roles never render it): create by email + role, the
   acceptance link is shown ONCE with a Copy button (the raw
   code is never stored), list with derived status + Revoke.
-- **Phone contacts card** (Local 2026-11-03,
+- **Phone contacts card** (Live, deploy-36, 2026-11-03,
   `src/components/PhoneContactsSettings.tsx`, Settings after
   Invites): mirrors the clinician's Active list into a phone
   address book named "CareTask" on our CardDAV server. Enable

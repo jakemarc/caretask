@@ -333,7 +333,7 @@ the `event_log` CHECK with the platform event types).
 - `appointments.episode_id` — UUID FK → patient_episodes, ON
   DELETE SET NULL. Stamped by the booking gate; pre-platform
   rows keep NULL until the platform migration stamps them.
-- `user_contact_sync` — phone contacts sync (Local 2026-11-03,
+- `user_contact_sync` — phone contacts sync (Live, deploy-36, 2026-11-03,
   `schema-contact-sync.sql`): one row per clinician — opaque
   `dav_username` (`u<user_id>`), enabled flag, `book_path` on
   our Radicale server, last sync time + result. The CardDAV

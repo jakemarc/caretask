@@ -114,7 +114,7 @@ the patient's agency history.
 | `GET /invites` | **Platform (Live, deploy-35): platform admin** — invites with derived status (pending/accepted/revoked/expired) |
 | `DELETE /invites/:id` | **Platform (Live, deploy-35): platform admin** — revoke a pending invite |
 | `POST /invites/accept` | **Platform (Live, deploy-35):** the one route open without a staff record — `{code, fname?, lname?}`; the token's email must match the invite (403 `INVITE_EMAIL_MISMATCH`); creates or claims the staff record with the invite's role |
-| `GET /contact-sync/me` | **Phone contacts (Local, 2026-11-03):** the caller's sync status — configured/enabled, dav username, server URL, book name, last sync + result, contact count |
+| `GET /contact-sync/me` | **Phone contacts (Live, deploy-36, 2026-11-03):** the caller's sync status — configured/enabled, dav username, server URL, book name, last sync + result, contact count |
 | `POST /contact-sync/me/enable` | **Phone contacts:** provision the caller's Radicale credential + "CareTask" address book and run the first sync; the CardDAV **password returns ONCE** (bcrypt hash only in Radicale's htpasswd; never stored in the DB); 409 `ALREADY_ENABLED`, 503 `SYNC_NOT_CONFIGURED` when the server env is unset |
 | `POST /contact-sync/me/regenerate-password` | **Phone contacts:** replace the caller's CardDAV password (returned once); the old one stops working immediately |
 | `POST /contact-sync/me/sync-now` | **Phone contacts:** reconcile the caller's book now (also runs on change — patient/link/merge/user hooks poke it — and hourly) |

@@ -6,8 +6,8 @@ built and verified but not deployed.
 
 ## 2026-11-03
 
-- **Phone contacts sync (CardDAV) — Local 2026-11-03 (built +
-  verified, deploy in flight as deploy-36).** Spec:
+- **Phone contacts sync (CardDAV) — LIVE as deploy-36,
+  2026-11-03.** Spec:
   `carddav-contacts-sync-spec.md` (Jake chose live sync over a
   vCard export, the list name "CareTask", and the CardDAV route
   over Google Contacts — not BAA-covered). A per-clinician
@@ -31,7 +31,14 @@ built and verified but not deployed.
   suite green (actives-only population, read-only enforcement,
   status flips, regeneration effective immediately, teardown);
   regressions green: platform 90, patients, users, users-mgmt,
-  patient-merge.
+  patient-merge. Deployed 2026-11-03: Radicale 3.9 on the API
+  VM behind Caddy at contacts.marcinnotech.net — Cloudflare
+  DNS A record added 2026-11-03 (proxy off); the Let's Encrypt
+  production certificate was obtained after a Caddy reload once
+  DNS resolved (the pre-DNS issuance attempts had been stuck
+  retrying the staging issuer with connection resets), and
+  HTTPS serving was browser-verified. Dashboard canonical
+  deployment c14cc11a.
 - **Multi-user platform — LIVE as deploy-35, 2026-11-03.**
   (Built + verified locally first; Jake reviewed the migration
   walkthrough, then said deploy.) Jake's design, informed by same-day model
