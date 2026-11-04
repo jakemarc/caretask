@@ -2045,3 +2045,78 @@ export async function syncContactsNow(user: User): Promise<ContactSyncCredential
 export async function disableContactSync(user: User): Promise<void> {
   await apiFetch(user, "/contact-sync/me", { method: "DELETE" });
 }
+
+// ------------------------------------------------------------------
+// Admin console (admin.marcinnotech.net — admin-site-spec.md).
+// Read-only aggregates behind the platform-admin gate
+// (admin/developer) on the API. The console probes
+// /admin/overview right after sign-in: a 403 means "signed in
+// as someone who is not a platform admin" and the console
+// shows its named wall instead of the app.
+
+export interface AdminOverview {
+  generated_at: string;
+  patients: { total: number; created_last_30d: number };
+  users: { total: number; active: number; by_role: Record<string, number> };
+  links: { active: number; hold: number; discharged: number };
+  episodes: { active: number; on_hold: number; discharged_total: number };
+  appointments: { today: number; next_7d: number; total: number };
+  agencies: { total: number; active: number };
+  invites: { pending: number };
+  contact_sync: Array<{
+    user_id: number;
+    email: string;
+    enabled: boolean;
+    last_sync_at: string | null;
+    last_result: string | null;
+    items: number;
+  }>;
+  backups: {
+    latest: { filename: string; size_bytes: number; mtime: string } | null;
+  };
+  auth_failures_24h: number;
+  recent_errors: Array<{
+    at: string;
+    event: string;
+    actor_email: string;
+    detail: string;
+  }>;
+}
+
+export interface AdminUserRow {
+  id: string;
+  firebase_uid: string | null;
+  email: string;
+  role: string;
+  authorized: boolean;
+  active: boolean;
+  fname: string | null;
+  mname: string | null;
+  lname: string | null;
+  suffix: string | null;
+  title: string | null;
+  position: string | null;
+  created_at: string;
+  updated_at: string;
+  links: { active: number; hold: number; discharged: number };
+  episodes_primary: number;
+  episodes_case_manager: number;
+  appointments_total: number;
+  contact_sync: {
+    enabled: boolean;
+    items: number;
+    last_result: string | null;
+    last_sync_at: string | null;
+  } | null;
+  last_event_at: string | null;
+}
+
+export async function fetchAdminOverview(
+  user: User,
+): Promise<AdminOverview> {
+  return (await apiFetch(user, "/admin/overview")) as AdminOverview;
+}
+
+export async function listAdminUsers(user: User): Promise<AdminUserRow[]> {
+  return (await apiFetch(user, "/admin/users")) as AdminUserRow[];
+}

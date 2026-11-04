@@ -532,6 +532,46 @@ and `migrate-platform.sql` gets reviewed before it runs live.
   `INVITE_EXPIRED`, `INVITE_EMAIL_MISMATCH`, `ALREADY_STAFF`,
   `USER_NOT_FOUND`, `SUPERVISOR_NOT_ON_TEAM`.
 
+## Admin console (routes/admin.js, mounted at /admin) — Live 2026-11-04 (deploy-38)
+
+Read-only aggregates for the admin site
+(admin.marcinnotech.net; spec: `admin-site-spec.md`). Mounted
+behind requireAuth + requireStaff in server.js; the router
+itself applies `requireRole('admin', 'developer')` (the same
+platform-admin definition as `routes/invites.js`), so every
+endpoint is gated on every request: no ACTIVE staff record →
+403 `NO_STAFF_RECORD`; any other role → 403 `ROLE_REQUIRED`.
+
+- `GET /admin/overview` → `{ generated_at, patients {total,
+  created_last_30d}, users {total, active, by_role}, links
+  {active, hold, discharged}, episodes {active, on_hold,
+  discharged_total}, appointments {today, next_7d, total},
+  agencies {total, active}, invites {pending}, contact_sync
+  [{user_id, email, enabled, last_sync_at, last_result,
+  items}], backups {latest {filename, size_bytes, mtime} |
+  null}, auth_failures_24h, recent_errors [{at, event,
+  actor_email, detail}] }`. Day boundaries are the database's
+  `CURRENT_DATE`. `backups` reads the newest file by mtime in
+  `ADMIN_BACKUPS_DIR` (default `/home/jakemarc2/backups`;
+  name/size/time only, null-safe when the folder is missing
+  or empty). `recent_errors` = the latest 10 `event_log` rows
+  from 7 days whose event is `auth_failure` or whose details
+  carry an error marker. All counts are cast to integers.
+- `GET /admin/users` → every staff row (safe columns —
+  `pin_hash` is never selected, not even hashed) with
+  per-user aggregates: `links {active, hold, discharged}`
+  (links with `removed_at` set don't count),
+  `episodes_primary`, `episodes_case_manager`,
+  `appointments_total` (non-deleted, as provider),
+  `contact_sync {enabled, items, last_result, last_sync_at}
+  | null`, `last_event_at` (newest `event_log` row for the
+  user's email).
+
+There are deliberately no admin writes: staff create / edit
+/ deactivate / restore stay on `/users`, invites on
+`/invites`, each with its own existing gates and event
+logging. Suite: `e2e-admin-test.js` (41 checks).
+
 ## Known gaps (deliberate, tracked)
 
 - `patients.clinician` is still free text ("Unassigned" default);

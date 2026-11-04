@@ -12,6 +12,16 @@ import {
 } from "./lib/theme";
 import Login from "./pages/Login";
 import AcceptInvite from "./pages/AcceptInvite";
+import AdminApp from "./admin/AdminApp";
+
+// The admin console lives on its own subdomain but ships in
+// the same Pages build (admin-site-spec.md §2): the hostname
+// decides which app boots. The admin host renders nothing
+// but the console; every other host renders the clinician
+// app exactly as before.
+const IS_ADMIN_HOST =
+  typeof window !== "undefined" &&
+  window.location.hostname === "admin.marcinnotech.net";
 import Dashboard from "./pages/Dashboard";
 import NotFound from "./pages/NotFound";
 
@@ -65,6 +75,8 @@ export default function App() {
 
   const toggleTheme = () =>
     setTheme((t) => (t === "light" ? "dark" : "light"));
+
+  if (IS_ADMIN_HOST) return <AdminApp />;
 
   return (
     <Routes>

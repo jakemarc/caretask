@@ -1143,6 +1143,42 @@ Medicare/CMS and research off). The card and the Settings
 checkboxes stay in sync via a window event, so a topic change
 applies without reopening the overview.
 
+## Admin console (Live — deploy-38, 2026-11-04)
+
+A separate administrators-only app in the same build,
+served on **admin.marcinnotech.net** (CNAME → the Pages
+project + a Pages custom domain; spec:
+`admin-site-spec.md`). `src/App.tsx` boots by hostname:
+the admin host renders `src/admin/AdminApp.tsx` and nothing
+else; all other hosts render the clinician app unchanged.
+
+- **Skin: Mission Control** (Jake's pick) — dark-only,
+  scoped under `.adm-root` in `src/admin/admin.css`, and
+  deliberately NOT tied to the main app's light/dark or
+  accent themes: dark = admin roof. Palette: bg `#0B1220`,
+  panels `#111C30`, accent teal `#2DD4BF`, mono numerals
+  `#7EF0DD`; status dots keep the house green/amber/red
+  semantics.
+- **Access face:** its own sign-in (same Firebase project).
+  After sign-in it probes `GET /admin/overview`; a 403 shows
+  the "Administrators only" wall naming the signed-in email
+  (built for the multi-login mix-up), anything else shows
+  the console. The API gate is the real enforcement.
+- **Sections:** Overview (stat cards; phone-sync table;
+  backup freshness with a > 26 h amber warning; recent
+  failures), Users (staff table with list counts — counts
+  only, no patient data; Edit role/authorized,
+  Deactivate/Restore via the existing `/users` endpoints),
+  Invites (create shows the accept link once — built against
+  the MAIN app origin, since /accept-invite lives in the
+  clinician app; list + revoke via `/invites`), Log (the
+  existing `/events` viewer data + chain verification).
+- **§8d:** the Settings **Invites card is no longer
+  rendered** in the main app (invites' home is the console);
+  `InvitesCard` in PlatformSettings.tsx is marked deprecated
+  and kept one round for reference. The Personnel/Clinician
+  directory stays in the main app.
+
 ## Build & deploy
 
 ```bash

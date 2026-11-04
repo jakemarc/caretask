@@ -4,6 +4,50 @@ All notable shipped changes to the CareTask platform. Newest first.
 "Live" means deployed and verified at the listed URL; "Local" means
 built and verified but not deployed.
 
+## 2026-11-04
+
+- **Admin console — LIVE as deploy-38, 2026-11-04.** Spec:
+  `admin-site-spec.md` (Jake's direction: an administrators-only
+  site on its own subdomain for user management + site
+  monitoring; theme **Mission Control**, Jake's pick from three
+  mockups). **API:** new `routes/admin.js` mounted at `/admin`
+  behind requireAuth + requireStaff, with the router adding the
+  platform-admin role gate (`requireRole('admin','developer')`,
+  the invites precedent) — read-only `GET /admin/overview`
+  (registry/staff/link/episode/appointment counts, per-user
+  phone-sync states, newest-backup freshness from
+  `ADMIN_BACKUPS_DIR` or `/home/jakemarc2/backups`, 24 h
+  auth-failure count, recent error events) and `GET
+  /admin/users` (staff rows — **never `pin_hash`** — plus
+  per-user list counts, episode roles, appointment totals,
+  sync state, last activity). Writes are NOT duplicated:
+  staff edits and invites keep flowing through `/users` and
+  `/invites`. **Dashboard:** new `src/admin/AdminApp.tsx` +
+  `admin.css` (dark-only Mission Control skin, scoped under
+  `.adm-root`); `App.tsx` boots by hostname —
+  `admin.marcinnotech.net` renders only the console, every
+  other host the clinician app unchanged. After sign-in the
+  console probes `/admin/overview`; a 403 renders an
+  "Administrators only" wall naming the signed-in email.
+  Invites live in the console now (its create flow builds the
+  accept link against the main app origin); the Settings
+  Invites card is no longer rendered in the main app (§8d).
+  **Hosting:** `admin.marcinnotech.net` is a CNAME →
+  marcinnotech-app.pages.dev (proxied) + a Pages custom
+  domain on the same project (status active, Google-issued
+  cert) — same build, same deploy, no VM/Caddy. **Data
+  (§8c):** the three `@example.com` seed staff rows are all
+  inactive (Dana Whitfield + Chris Novak deactivated in this
+  round; Maria Santos was already inactive), so no test row
+  carries the admin-capable developer role. **Testing:**
+  `e2e-admin-test.js` (41 checks, written spec-first as the
+  build contract) green, plus regressions — platform 90/90,
+  contact-sync 35/35, patients / users / users-mgmt /
+  patient-merge green. Dashboard canonical deployment
+  `871fbf72`, bundle `index-BkZsINxQ.js`, build stamp
+  mw23r27r-f3hh6g; API files backed up on the VM as
+  `.bak-2026-11-04-deploy38`.
+
 ## 2026-11-03
 
 - **Phone contacts enable hotfix — LIVE as deploy-37,
