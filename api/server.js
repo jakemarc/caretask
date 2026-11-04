@@ -45,6 +45,7 @@ const newsRouter = require('./routes/news');
 const episodesRouter = require('./routes/episodes');
 const invitesRouter = require('./routes/invites');
 const contactSyncRouter = require('./routes/contactSync');
+const adminRouter = require('./routes/admin');
 const { startContactSyncTimer } = require('./lib/contactSync');
 
 // Fail fast at boot if the Firebase project is not configured: without it,
@@ -126,6 +127,10 @@ app.use('/', requireAuth, requireStaff, episodesRouter);
 // /contact-sync/me. Inert unless the CARDDAV_* env is configured.
 app.use('/contact-sync', requireAuth, requireStaff, contactSyncRouter);
 startContactSyncTimer();
+// Admin console API (admin.marcinnotech.net): read-only
+// aggregates; the router adds the platform-admin role gate
+// (admin/developer) on top of the staff gate here.
+app.use('/admin', requireAuth, requireStaff, adminRouter);
 
 // Error handler: log the real error server-side, send a generic message.
 app.use((err, req, res, next) => {

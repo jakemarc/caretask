@@ -205,3 +205,29 @@ API sync engine + Settings card; verified locally against a
 real Radicale (35 checks) before deploy. Public reachability
 waits on the contacts DNS record + Caddy TLS; Jake's iPhone
 pilot is the final verification.
+
+## 2026-11-04 — Admin console on its own subdomain; Mission Control theme; seed rows deactivated
+
+Jake asked for an administrators-only site ("a different
+subdomain for user management, site monitoring, only for us
+administrators") after the Nov 4 login/list audit showed why
+his phone displayed ~130 patients and his PC 1 (different
+logins, different per-user lists). Spec:
+`admin-site-spec.md`. Jake picked the **Mission Control**
+theme (dark ops deck) from three mockups — the console is
+dark-only on purpose (dark = admin roof), independent of the
+main app's themes. He approved the build with "go",
+including the spec's §8 defaults: subdomain
+admin.marcinnotech.net on the same Pages project; developer
+counts as platform admin (the existing definition);
+**deactivate the three @example.com seed staff rows** (done
+in deploy-38 — all three inactive, so no test row holds an
+admin-capable role); invites' home moves to the console
+(the main-app Settings card is hidden; the Clinician
+directory stays). Built and LIVE as deploy-38: API
+`routes/admin.js` (read-only overview + users aggregates,
+platform-admin gated, pin_hash never selected) with the
+spec-first suite `e2e-admin-test.js` at 41/41 plus full
+regressions; dashboard AdminApp with the named
+"Administrators only" wall; DNS CNAME + Pages custom domain
+active.

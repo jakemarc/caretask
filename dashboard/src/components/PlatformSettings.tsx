@@ -212,6 +212,9 @@ export function MyAgenciesCard({ user, apiConnected }: Props) {
   );
 }
 
+// DEPRECATED (deploy-38): invites live in the admin console now
+// (src/admin/AdminApp.tsx). This card is no longer rendered
+// anywhere; kept one round for reference, then remove.
 export function InvitesCard({ user, apiConnected }: Props) {
   const me = useMyStaff(user);
   const isPlatformAdmin =
