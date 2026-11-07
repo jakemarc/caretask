@@ -10,6 +10,11 @@ import {
   googleAuthErrorMessage,
   signInWithGoogle,
 } from "../lib/googleAuth";
+import {
+  PASSWORD_RESET_SENT_MESSAGE,
+  passwordResetErrorMessage,
+  requestPasswordReset,
+} from "../lib/passwordReset";
 import type { Theme } from "../lib/theme";
 import { Moon, Sun } from "lucide-react";
 import Mark from "../components/Mark";
@@ -28,6 +33,7 @@ export default function Login({
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState(true);
 
@@ -48,10 +54,32 @@ export default function Login({
 
   if (checking) return null;
 
+  async function handlePasswordReset() {
+    if (!auth) return;
+    setError("");
+    setNotice("");
+    if (!email.trim()) {
+      setError(
+        "Type your email above first, then tap the password link again.",
+      );
+      return;
+    }
+    setBusy(true);
+    try {
+      await requestPasswordReset(auth, email);
+      setNotice(PASSWORD_RESET_SENT_MESSAGE);
+    } catch (err) {
+      setError(passwordResetErrorMessage(err) || friendlyError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleEmailAuth(e: React.FormEvent) {
     e.preventDefault();
     if (!auth) return;
     setError("");
+    setNotice("");
     setBusy(true);
     try {
       await signInWithEmailAndPassword(auth, email, password);
@@ -66,6 +94,7 @@ export default function Login({
   async function handleGoogleSignIn() {
     if (!auth) return;
     setError("");
+    setNotice("");
     setBusy(true);
     let redirecting = false;
     try {
@@ -142,7 +171,19 @@ export default function Login({
               disabled={!isFirebaseConfigured}
             />
           </label>
+          <p className="section-note">
+            <button
+              type="button"
+              className="linklike"
+              onClick={() => void handlePasswordReset()}
+              disabled={busy || !isFirebaseConfigured}
+            >
+              Forgot your password — or only ever used Google? Set a
+              password
+            </button>
+          </p>
           {error && <p className="login-error">{error}</p>}
+          {notice && <p className="login-notice">{notice}</p>}
           <button
             className="btn btn-primary"
             type="submit"

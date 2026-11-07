@@ -13,6 +13,11 @@ import {
   googleAuthErrorMessage,
   signInWithGoogle,
 } from "../lib/googleAuth";
+import {
+  PASSWORD_RESET_SENT_MESSAGE,
+  passwordResetErrorMessage,
+  requestPasswordReset,
+} from "../lib/passwordReset";
 import { acceptInvite, type ApiRequestError } from "../lib/patientApi";
 import type { Theme } from "../lib/theme";
 import { Moon, Sun } from "lucide-react";
@@ -44,6 +49,7 @@ export default function AcceptInvite({
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
 
@@ -74,6 +80,7 @@ export default function AcceptInvite({
     e.preventDefault();
     if (!auth) return;
     setError("");
+    setNotice("");
     setBusy(true);
     try {
       const cred = await createUserWithEmailAndPassword(
@@ -96,6 +103,7 @@ export default function AcceptInvite({
     e.preventDefault();
     if (!auth) return;
     setError("");
+    setNotice("");
     setBusy(true);
     try {
       const cred = await signInWithEmailAndPassword(
@@ -111,9 +119,31 @@ export default function AcceptInvite({
     }
   }
 
+  async function handlePasswordReset() {
+    if (!auth) return;
+    setError("");
+    setNotice("");
+    if (!email.trim()) {
+      setError(
+        "Type your email above first, then tap the password link again.",
+      );
+      return;
+    }
+    setBusy(true);
+    try {
+      await requestPasswordReset(auth, email);
+      setNotice(PASSWORD_RESET_SENT_MESSAGE);
+    } catch (err) {
+      setError(passwordResetErrorMessage(err) || friendlyError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleGoogle() {
     if (!auth) return;
     setError("");
+    setNotice("");
     setBusy(true);
     let redirecting = false;
     try {
@@ -321,6 +351,7 @@ export default function AcceptInvite({
                 />
               </label>
               {error && <p className="login-error">{error}</p>}
+              {notice && <p className="login-notice">{notice}</p>}
               <button
                 className="btn btn-primary"
                 type="submit"
@@ -340,6 +371,19 @@ export default function AcceptInvite({
               >
                 Continue with Google
               </button>
+              {mode === "existing" && (
+                <p className="section-note">
+                  <button
+                    type="button"
+                    className="linklike"
+                    onClick={() => void handlePasswordReset()}
+                    disabled={busy || !isFirebaseConfigured}
+                  >
+                    Forgot your password — or only ever used Google? Set
+                    a password
+                  </button>
+                </p>
+              )}
             </form>
           </>
         )}

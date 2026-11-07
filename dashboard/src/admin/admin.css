@@ -88,6 +88,8 @@
   border: 1px solid #7f1d2d;
 }
 .adm-error { color: #fda4af; font-size: 13px; line-height: 1.5; }
+.adm-notice { color: #86efac; font-size: 13px; line-height: 1.5; }
+.adm-authcard .linklike { color: var(--adm-accent); }
 .adm-or { text-align: center; color: var(--adm-muted); font-size: 12px; }
 
 .adm-bar {

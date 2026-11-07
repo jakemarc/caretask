@@ -21,7 +21,7 @@ the theme contract below.
 src/
   App.tsx                  routes: / → /app, /login, /app (RequireAuth)
   pages/
-    Login.tsx              email/password + Google sign-in (popup, with redirect fallback)
+    Login.tsx              email/password + Google sign-in (popup/redirect) + password set/reset link
     Dashboard.tsx          the whole signed-in app (large file)
     NotFound.tsx
   components/
@@ -37,6 +37,7 @@ src/
   lib/
     firebase.ts            Firebase app/auth init (config from .env)
     googleAuth.ts          Google sign-in popup/redirect fallback + error text
+    passwordReset.ts       password set/reset email helper + messages
     patientApi.ts          ALL API calls + types (ApiUser, StaffInput…)
     demoData.ts            demo schedule/zones data, ZONE_GUIDE
     googleContacts.ts      People API client (GIS token, in-memory)

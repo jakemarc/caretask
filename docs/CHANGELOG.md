@@ -6,6 +6,27 @@ built and verified but not deployed.
 
 ## 2026-11-07
 
+- **Password set/reset link on the sign-in screens — deploy-45,
+  LIVE 2026-11-07.**
+  Jake asked whether an admin can reset passwords or sign in
+  as a user (answer: no — console is view-only for users,
+  impersonation is out of scope in the admin spec §9, and the
+  API holds no Firebase Admin SDK key) and how a Google-only
+  user like him gets a username/password. New shared
+  `src/lib/passwordReset.ts` wraps Firebase
+  `sendPasswordResetEmail`; the link "Forgot your password —
+  or only ever used Google? Set a password" now sits on the
+  Login form, the Admin sign-in, and Accept Invite's
+  "I have an account" mode. Completing the emailed flow adds
+  email/password to the same account (Google sign-in keeps
+  working), which is the clean sign-in path on devices where
+  Google sign-in is blocked. Success shows a check-your-email
+  notice; with enumeration protection on, the response never
+  reveals whether an account exists. Deployment: canonical
+  00288144, bundle index-D5mWdDwE.js, build stamp
+  mw6fq3av-ub5uyf; served-bundle markers and /health
+  verified. Dashboard-only.
+
 - **Google sign-in fallback for blocked popups — deploy-44,
   LIVE 2026-11-07.**
   Jake reported Google sign-in blocked on a managed Android

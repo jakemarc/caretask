@@ -19,6 +19,11 @@ import {
   googleAuthErrorMessage,
   signInWithGoogle,
 } from "../lib/googleAuth";
+import {
+  PASSWORD_RESET_SENT_MESSAGE,
+  passwordResetErrorMessage,
+  requestPasswordReset,
+} from "../lib/passwordReset";
 import Mark from "../components/Mark";
 import {
   createInvite,
@@ -79,6 +84,7 @@ function AdminSignIn() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -88,11 +94,34 @@ function AdminSignIn() {
     });
   }, []);
 
+  async function handlePasswordReset() {
+    if (!auth) return;
+    setError("");
+    setNotice("");
+    if (!email.trim()) {
+      setError("Type your email above first, then tap the password link again.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await requestPasswordReset(auth, email);
+      setNotice(PASSWORD_RESET_SENT_MESSAGE);
+    } catch (err) {
+      setError(
+        passwordResetErrorMessage(err) ||
+          "Couldn't send the password email. Try again.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function emailSignIn(e: React.FormEvent) {
     e.preventDefault();
     if (!auth) return;
     setBusy(true);
     setError("");
+    setNotice("");
     try {
       await signInWithEmailAndPassword(auth, email, password);
     } catch {
@@ -106,6 +135,7 @@ function AdminSignIn() {
     if (!auth) return;
     setBusy(true);
     setError("");
+    setNotice("");
     let redirecting = false;
     try {
       const outcome = await signInWithGoogle(auth);
@@ -158,6 +188,7 @@ function AdminSignIn() {
             />
           </label>
           {error && <p className="adm-error">{error}</p>}
+          {notice && <p className="adm-notice">{notice}</p>}
           <button className="adm-btn" type="submit" disabled={busy}>
             Sign in
           </button>
@@ -170,6 +201,17 @@ function AdminSignIn() {
           >
             Sign in with Google
           </button>
+          <p className="adm-or">
+            <button
+              type="button"
+              className="linklike"
+              onClick={() => void handlePasswordReset()}
+              disabled={busy}
+            >
+              Forgot your password — or only ever used Google? Set a
+              password
+            </button>
+          </p>
         </form>
       </div>
     </div>
