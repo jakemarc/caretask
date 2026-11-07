@@ -671,8 +671,10 @@ restrictions, not by secrecy).
   per-day chain editor plus a report generator; there is no
   approval flow and no report envelopes in the UI. The chain
   builds itself: Home -> Office bookends are fixed PERSONAL
-  legs (addresses from the clinician's staff profile and the
-  agency profile, geocoded client-side; their routed miles
+  legs (home from the clinician's staff profile; office from
+  the clinician's own office address — Settings → Home &
+  Office — when any part of it is set, else the agency
+  profile; geocoded client-side; their routed miles
   snapshot onto the day's legs at save). Stops added between
   them are billable legs in visit order, ending back at the
   office. Every stop can be set three ways: tap **Home** /
@@ -695,6 +697,45 @@ restrictions, not by secrecy).
   view is a notice only. The old envelope UI (report list,
   submit / manager review / print window) is gone; legacy
   reports remain readable through the API only.
+  **Deploy-41 (LIVE 2026-11-06)** adds
+  the Concur-style layer on this view: a **Receipts** control
+  (paperclip + count badge) on every day-log leg and expense
+  line — upload (image/PDF), view (blob fetch through the
+  API), delete; the day log's rate now resolves from the
+  Settings rate table for the entry's date ("Rate from the
+  rate table for this date" hint), with the stored page rate
+  as fallback only; an **Other expenses** card under the day
+  totals (add/edit/delete non-mileage lines — Tolls /
+  Parking / Meals / Supplies / Other — included in the
+  generated report, the report totals line, and the Concur
+  CSV as their own rows); a **Save as report** action on the
+  generated report (an existing draft for the period opens
+  instead of duplicating) and a **Saved reports** list whose
+  detail shows the approval timeline and the role/state-
+  correct transition buttons (Submit; Approve / Reject;
+  Send back to draft; Mark paid with an optional payment
+  reference — a manager looking at their OWN report sees "You
+  can't approve your own report" instead of the buttons, the
+  API's `SELF_APPROVAL` rule); receipt-policy warnings appear
+  on the report and block Submit with the violating lines
+  named. Settings gains two manager-gated cards (rendered
+  after Home & Office): **Mileage rates** (effective-dated
+  rate list + add; history is superseded, never edited) and
+  **Expense policy** (require-receipts toggle + optional
+  amount threshold). Legs/lines on a submitted-or-later
+  report are locked by the API (`REPORT_LOCKED` surfaces in
+  the receipts panel and line editor).
+  **Deploy-42 (LIVE 2026-11-06)** — the stop editor's
+  locate button (`fillNearest`): a patient home within ~2 mi
+  fills that patient (unchanged); otherwise the GPS point is
+  reverse-geocoded via `reverseGeocode` in `lib/geo.ts`
+  (Nominatim on the shared courtesy chain, zoom 18 → 16 → 14
+  until a street address resolves) and the ADDRESS is
+  inserted as a custom stop with the GPS coordinates
+  attached for routing — coordinate text is never inserted;
+  if no address resolves at any zoom, nothing is inserted,
+  no error shows, and a neutral hint offers typing the
+  address instead (typing always remains available).
 
 ## Duplicate review + mark-as-duplicate (Live 2026-11-02, deploy-28)
 
@@ -858,6 +899,42 @@ exactly like the other API panels.
   (also shown once), and a two-step Turn off. When the server
   env is unconfigured the card says so instead of offering
   enable.
+
+## Home & Office card (built locally 2026-11-05 — deploy-40 pending)
+
+- **Settings → Home & Office** (`src/components/HomeOfficeSettings.tsx`,
+  rendered after My agencies): the clinician sets their own
+  HOME and OFFICE addresses — the two bookends the Mileage
+  chain classifies by. Before this card there was nowhere in
+  Settings to set either: Home silently read the staff
+  profile's single contact address and Office the selected
+  agency's address, so with both blank the bookends never
+  resolved and the commute/personal classification never
+  fired. Two `.add-form` blocks (the staff-form pattern):
+  **Home address** (street with AddressAutocomplete, city,
+  StateSelect, ZIP — the profile street/city/state/zip) and
+  **Office address** (the same fields over `office_*`), each
+  with its own button — **Add home/office address** while that
+  block is completely empty on file, **Save …** afterwards —
+  writing `PUT /users/me/addresses`. On save the card shows
+  the saved notice and refreshes the shared staff record
+  (`refreshMyStaff` in `lib/useMyRole.ts`), so the Mileage
+  page sees the change without a reload. The card copy states
+  the contract: home↔office legs count as personal (commute)
+  miles, and the personal office is used before the agency's
+  address.
+- **Mileage bookend source (ExpensesView):** the office stop
+  prefers the signed-in user's own office address when any
+  `office_*` field is set — Stop kind "office", label exactly
+  "Office", geocoded like the other stops — and falls back to
+  the selected agency's address (label = agency display name)
+  when no personal office is set. `loadDay` classifies a saved
+  day against the label of the source in play, and
+  `stopFromEndpoint` treats the literal label "Office" as an
+  office stop defensively, so personal-office days reload
+  with their bookends intact. The office stop chip reads
+  "Office" (was "Agency office"). The `legKind` bookend rule
+  and the API report math are unchanged.
 
 ## Calendar chrome (Live 2026-11-03, deploy-33)
 

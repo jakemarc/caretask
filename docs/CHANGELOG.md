@@ -4,8 +4,387 @@ All notable shipped changes to the CareTask platform. Newest first.
 "Live" means deployed and verified at the listed URL; "Local" means
 built and verified but not deployed.
 
+## 2026-11-06
+
+- **Mileage locate-button fallback — deploy-42, LIVE
+  2026-11-06.** Jake reported the Mileage stop editor's
+  locate button only filled the closest patient home within
+  ~2 mi and errored otherwise (including lists with no
+  patients at all). Per his direction — "on instances like
+  that I want the location inserted", refined to: the
+  ADDRESS BOX, never coordinate text, and typing an address
+  always remains available — the button now behaves three
+  ways: a patient home within ~2 mi fills that patient as
+  before; otherwise the GPS point is reverse-geocoded
+  (`reverseGeocode` in `src/lib/geo.ts`, Nominatim via the
+  shared ~1/sec courtesy chain, zoom 18 → 16 → 14 until a
+  street address resolves) and inserted as a CUSTOM stop
+  with the GPS coordinates attached for routing precision;
+  if no address resolves at any zoom, nothing is inserted
+  and no error shows — a neutral hint reads "No patient
+  home near and no address found for your spot — just type
+  the address." Dashboard-only change, no API deploy.
+  Deployment record: canonical deployment 5c10d57b, bundle
+  index-CM9cKQKA.js, build stamp mw5mkhs5-ds9j68, API URL +
+  locate markers verified in the served bundle, /health OK.
+  Jake's signed-in locate check is his to run.
+- **Concur-style expense upgrade — deploy-41, LIVE
+  2026-11-06.** Approved by Jake 2026-11-05; built and
+  verified locally 2026-11-06; deployed the same day on
+  Jake's go (SELF_APPROVAL block KEPT per his decision, see
+  DECISIONS.md). Deployment record: API — routes/expenses.js
+  + server.js replaced on the VM (backups
+  *.bak-2026-11-06-deploy41; sha256 verified in place), the
+  five migrations applied in order with no errors,
+  patient-api restarted healthy, /health OK, /expense-reports
+  401 unauthenticated. Dashboard — production deployment
+  143fd713 (canonical), bundle index-C-j56rfJ.js, build stamp
+  mw533rmm-oo0gph, API URL verified in the bundle. Signed-in
+  expense flow check is Jake's. Five items on
+  the existing expense model (no parallel system): (1)
+  **Receipt attachments** per mileage leg and per non-mileage
+  expense line — multiple per line; file bytes in Postgres
+  BYTEA (`expense_receipts`) so nightly DB backups cover
+  them; base64 JSON upload (scoped 12 MB parser in server.js
+  for the expense prefixes), mime allowlist jpeg/png/webp/pdf
+  with magic-byte verification, 8 MiB cap; metadata-only
+  lists, authenticated content download, soft delete.
+  (2) **Mileage rate table** (`mileage_rates`) with effective
+  dates — ranges recomputed on insert, duplicate start date
+  409 `RATE_DATE_EXISTS`, history superseded never edited;
+  the day log defaults to the rate resolved for the entry's
+  date (localStorage page rate is fallback only); Settings →
+  Mileage rates card (manager-gated writes). (3) **Approval
+  history** — the generated report can be SAVED as an
+  `expense_reports` record (`model='chain'`; legacy rows keep
+  their old math) linking the period's unlinked legs + lines,
+  then Submit → Approve / Reject (→ back to draft) → Paid via
+  `POST /expense-reports/:id/transition`; every transition
+  appends an `expense_report_events` row rendered as a
+  timeline on the report; the pre-Deploy-27 **SELF_APPROVAL**
+  block is reinstated (a manager cannot approve/reject/pay
+  their own report — 403). Lines on a submitted-or-later
+  report are locked (409 `REPORT_LOCKED`). (4)
+  **Receipt-required policy** — platform-level singleton
+  (`expense_settings`): `require_receipts` + optional amount
+  threshold (commute legs exempt); violations warn in the
+  report and BLOCK submit (422 `RECEIPTS_REQUIRED` naming the
+  lines by kind/id/date); Settings → Expense policy card.
+  (5) **Itemization** — non-mileage lines (`expenses.report_id`
+  now nullable; `supplies` added to the category CHECK) get
+  full CRUD + a dashboard "Other expenses" card (Tolls /
+  Parking / Meals / Supplies / Other), flow into generated +
+  saved report totals (`grand_total_amount_cents`; the old
+  `total_amount_cents` keeps its mileage-only meaning), and
+  appear in the Concur CSV as their own rows (mileage rows
+  byte-identical). API: routes/expenses.js extended (receipts,
+  rates, policy, lines, report create/transition, model-aware
+  detail); five new migrations in order after
+  schema-mileage-chains.sql (itemization, receipts, rates,
+  policy, approvals — all idempotent, re-apply clean).
+  Dashboard: new ReceiptsPanel + ExpenseAdminSettings
+  components, ExpensesView extended (receipts, rate hints,
+  other-expenses card, saved reports + timeline + transitions),
+  bundle `index-MOAne7Ga.js`. Tests: NEW
+  `e2e-expense-upgrade-test.js` 104/104 and updated
+  `e2e-expenses-test.js` 43/43 (the three retired-write 404
+  checks flipped), each as superuser AND as `patient_api` on
+  fresh DBs; full 18-suite regression set green as superuser
+  and as `patient_api` (exceptions, both pre-existing and
+  unrelated: `e2e-contact-sync-test.js` needs its Radicale +
+  CARDDAV_* scratch environment — identical 5 failures on the
+  pre-41 schema; `e2e-events-test.js` as `patient_api` needs
+  owner-level TRUNCATE CASCADE on the append-only audit
+  tables by harness design). Docs: API.md mileage section
+  rewritten, DATA-MODEL.md + DEVELOPMENT.md updated,
+  DECISIONS.md entries added.
+
+## 2026-11-05
+
+- **Home & Office addresses — deploy-40, ordered
+  2026-11-05, LIVE 2026-11-06 (deployment record at the
+  end of this entry).** Jake's fix for the silent mileage failure:
+  the Mileage chain's Home bookend read the staff profile's
+  single contact address and the Office bookend the selected
+  agency's address, and there was nowhere in Settings to set
+  either — so for a clinician with blank profile/agency
+  addresses the bookends never resolved and home↔office legs
+  never classified as personal (commute) miles. **API:**
+  `schema-users-office.sql` adds `office_street` /
+  `office_city` / `office_state` / `office_zip` to users
+  (idempotent ALTERs in the `schema-users-position.sql`
+  style; the existing table-level grants already cover the
+  new columns — verified for the limited runtime user); the
+  four join `SAFE_COLUMNS` (so `GET /users/me` and every staff
+  read carry them) and the `WRITABLE` whitelist. New
+  self-service `PUT /users/me/addresses` (the `/me/agencies`
+  pattern; caller-scoped by construction, so no one can write
+  another clinician's row): home block
+  (street/city/state/zip) and/or office block, strings
+  trimmed, blank/null clears, unknown fields ignored,
+  400 `VALIDATION` on a non-string or an empty body,
+  403 `NO_STAFF_RECORD` without an active staff row; logs an
+  `admin_action` `user_update` event naming the touched field
+  NAMES — never address values. **Dashboard:** Settings gains
+  a **Home & Office** card (after My agencies) — two
+  `.add-form` blocks using the shared AddressAutocomplete +
+  StateSelect, each block's button reading **Add home/office
+  address** while the block is empty on file and **Save …**
+  afterwards; saving refreshes the shared staff record
+  (`refreshMyStaff`) so the Mileage page picks the change up
+  without a reload. ExpensesView: the office bookend now
+  prefers the clinician's own office address (Stop label
+  exactly "Office") over the agency address, `loadDay`
+  classifies saved days against the matching label, and
+  `stopFromEndpoint` treats the literal "Office" label as an
+  office stop; the stop chip reads "Office". The `legKind`
+  bookend rule and the API report math are unchanged. Also in
+  this round (Jake, 2026-11-06): the leg route control is now
+  a single **Tollway** checkbox replacing the Tollway / Back
+  roads segmented toggle — checked counts the tollway route's
+  miles, unchecked counts the back-roads miles; both routed
+  figures still print beside the leg. Also in this round
+  (Jake, 2026-11-06): the stop editor's Address box gains a
+  **location (target) icon button** — one GPS fix fills the
+  box with the **closest patient home's** address from the
+  patient record (stored coordinates + the maps code's
+  haversine; Jake picked auto-fill of the single nearest over
+  a confirm-chooser; >2 mi away or no stored coordinates
+  reports "no patient home near" instead of filling). This
+  restores the nearest-home fill the retired Deploy-18 form
+  had, lost in the chain rewrite. Also in this round (Jake,
+  2026-11-06): a **Concur CSV** button beside Print / PDF on
+  the generated Expense report — an SAP Concur-compatible
+  export (columns: Report Name, Transaction Date, Expense
+  Type "Personal Car Mileage" (matched to Jake's employer
+  Concur naming, 2026-11-06), From/To Location, Distance, Distance Unit,
+  Rate, Amount, Currency, Business Purpose, Comment), one
+  row per billable leg; personal (commute) legs excluded;
+  From/To carry addresses, never patient names, and the
+  Business Purpose is the generic "Home health patient
+  visits". Amounts use each leg's saved rate snapshot,
+  falling back to the page rate. Also in this round (Jake,
+  2026-11-06): **Fill from calendar** — on a day with no
+  saved mileage, a button beside Save builds the chain from
+  that day's scheduled visits on the clinician's personal
+  calendar (start-time order, cancelled excluded): Home →
+  Office → each patient → Office → Home, bookends only where
+  an address resolves; visits whose patient has no address
+  or coordinates are skipped and counted in the notice. Legs
+  auto-route as usual, and each leg now saves its
+  `appointment_id` so mileage ties back to the visit (the
+  field existed in the API; the dashboard now sends and
+  restores it). Also in this round (Jake, 2026-11-06): in
+  mobile view (≤720px) the chain's **Add a stop** button
+  collapses to a round **+** icon button inline at the end
+  of the chain (label + hint hidden; desktop unchanged).
+  Also in this round (Jake, 2026-11-06): a **Bookends**
+  toggle in the chain header hides the fixed Home/Office
+  stops (hidden by default, persisted per browser;
+  render-only — legs between two hidden bookends hide too,
+  but classification and totals always use the full chain),
+  and middle stops (patient/custom) can be **dragged by a
+  grip handle** to reorder the chain (pointer-based, works
+  on touch; bookends pinned; legs rebuild by endpoint pair
+  — unchanged pairs keep their data, new pairs re-route and
+  inherit the appointment link + tollway choice of the leg
+  that ended at the same stop). Also in this round (Jake,
+  2026-11-06): the **SAP Concur CSV export moved from the
+  Mileage page to the sidebar Reports view** — the CSV
+  builder now lives in `src/lib/concurCsv.ts` (same file
+  format: one row per billable leg, "Personal Car Mileage",
+  commute legs excluded), the Mileage page's Expense report
+  keeps only Generate + Print / PDF, and Reports gains an
+  **Exports** card (`ConcurExportCard`) with its own
+  period / month-or-range / agency controls that fetches the
+  report fresh and downloads the CSV, falling back to the
+  Mileage page's saved rate for legs without a rate
+  snapshot. Also in this round (Jake, 2026-11-06): in
+  desktop view (the stylesheet's wide breakpoint,
+  ≥1001px) the Mileage chain's stops render as a **table**
+  — one row per stop (grip / Kind / Stop / Address /
+  "Leg in" / Actions) with the incoming leg's miles,
+  Tollway checkbox, routed figures, and Billable/Personal
+  badge in its own column; rows drag by the same grip
+  handle and pointer logic as the list (bookends pinned),
+  the address column ellipsizes as the card narrows, and
+  the stop editor opens in a full-width row under the
+  edited stop. Below the breakpoint the chain list is
+  unchanged. Also in this round (Jake, 2026-11-06): the
+  sidebar **Reports button gains an Expenses submenu**
+  (chevron + `.nav-submenu`, auto-expanded on the Reports
+  tab or when Expenses was opened from it, toggleable by
+  clicking Reports again, and shown in the mobile drawer)
+  with two items: **Mileage Report** — opens the Expenses
+  tab landed on its Expense report card (ExpensesView
+  scrolls `.mlg-report` into view via a new
+  `focusReportNonce` prop) — and **Generate Concur
+  Report** — a one-click action that fetches the CURRENT
+  calendar month's mileage (all agencies) and downloads
+  the Concur CSV immediately, confirming through a new
+  minimal Dashboard toast (`app-toast`, ~6s auto-dismiss;
+  an error toast covers the not-connected and fetch-failure
+  cases). The division of labor: the submenu item is the
+  current-month shortcut; custom period/agency exports
+  stay on the Reports view's `ConcurExportCard`. Also in
+  this round (Jake, 2026-11-06): leg **miles are
+  click-to-edit** in both chain views — the always-visible
+  miles input is replaced by a shared `MilesEdit`
+  component that renders the leg's effective miles as bold
+  text with a dotted underline (the mobile list's LegRow
+  and the desktop table's "Leg in" cell alike); clicking
+  swaps in a number input with the value selected
+  (Enter/blur commits, rounded to 2 decimals;
+  empty/non-numeric/negative reverts silently; Escape
+  cancels). The commit writes the leg's existing `miles`
+  field — the manual override the totals, the save
+  payload (`business_miles`), and through the saved
+  entries the report and Concur CSV already read — for
+  ALL legs including the fixed commute bookends
+  (classification never changes from a miles edit). An
+  override shows a derived **Edited** flag plus a "Routed
+  was X" hint: the flag compares the effective miles
+  against the routed figure for the selected route, so
+  re-entering the routed value clears it on its own, and
+  it round-trips through save/load (stored business miles
+  vs the stored routed figures and tollway choice).
+  Also in this round (Jake, 2026-11-06): the generated
+  mileage **report shows addresses only — no patient
+  names**: report leg rows render
+  `start_address → end_address` ("—" when an endpoint has
+  no address on file) with the label (patient-name)
+  fallback removed, covering the on-screen report and
+  Print/PDF alike (the clinician's own name in the report
+  header stays); the **Concur CSV** From/To columns drop
+  the same fallback — address only, blank when none is on
+  file. The day-log chain editor still shows patient
+  names as before.
+  Also in this round (Jake, 2026-11-06): the mobile
+  chain **list is decluttered** — stop rows no longer
+  show the kind caption (Patient / Stop) and no longer
+  carry an **Edit button**; the stop's **address is the
+  tap target** that opens the stop editor (the label
+  stands in when there's no address text to tap; the
+  Delete affordance is unchanged, and the desktop table
+  keeps its Kind column and Edit button). Also in this
+  round (Jake, 2026-11-06): editing a stop's address
+  **re-matches the patient** — the new address is matched
+  against the clinician's patients' addresses on file
+  (normalized street + city, ZIP checked when both sides
+  carry one), and an exactly-one match makes the stop
+  that patient (link, name, coordinates from the
+  record); no match or an ambiguous one (a shared
+  household address) leaves the stop as set, and
+  bookends are never re-matched. An address (or
+  coordinate) change also **forces both adjacent legs to
+  recalculate**: their routed figures, `routed_sig`, and
+  effective miles are cleared in the stop-save path, so
+  the routing effect re-routes and reseeds the miles —
+  a hand-entered miles override from the old endpoints
+  is discarded, never carried onto the new route.
+  Also in this round (Jake, 2026-11-06): the mobile
+  chain list rows carry a **per-row + button**
+  (`mlg-stop-add`) at the end of the row that **inserts
+  a new blank stop directly below that row** and opens
+  its editor (switching editors if another stop was
+  open). It is offered where the new stop lands inside
+  the visits region — every patient/custom stop and
+  the **opening Office** (insert = first visit) — but
+  not on the opening Home when an Office follows it
+  (that would split the fixed Home→Office commute leg)
+  and not on the closing bookends. Inserting below the
+  opening Office of a bare [home, office, home] day
+  splits the single office into start + return copies,
+  the same template fix the chain-end Add makes. The
+  leg that connected the tapped stop to the next one
+  is **replaced by two blank legs** — (tapped → new)
+  and (new → next) — which route fresh once the new
+  stop has coordinates; the replaced leg's miles and
+  any hand-entered override do not carry into either,
+  and every other leg is untouched. The chain-end Add
+  and the desktop table are unchanged.
+  Also in this round (Jake, 2026-11-06): the desktop
+  **table reaches interaction parity** with the list —
+  each eligible row carries the same **+ insert-below**
+  button (insert eligibility is now ONE shared
+  implementation, `canInsertAfter`, for both
+  renderings), the row actions become three Lucide
+  **icon buttons** sharing one style (`mlg-ticon`:
+  Plus / Pencil / Trash2 — Edit loses its text label),
+  and the **address cell is click-to-edit**: clicking
+  the cell that displays the address opens the stop
+  editor (the Stop/label cell stands in when there's
+  no address to click — the list's fallback). Miles in
+  the Leg-in cell were already click-to-edit via the
+  shared MilesEdit and are untouched. The mobile list
+  rendering is unchanged.
+  Rebuilt bundle
+  `index-BIl3VZh-.js` (contains the `mlg-toll` checkbox, the
+  `mlg-locate-btn` nearest-home fill, the Concur
+  export under Reports, the `mlg-table` desktop chain, the
+  Reports sidebar submenu, click-to-edit miles
+  (`mlg-miles`), address-only report/CSV legs, the
+  tap-to-edit list rows (`mlg-stop-tap`), address-change
+  patient re-matching, recalculation on address
+  change, the per-row list insert (`mlg-stop-add`), and
+  the desktop-table parity (row insert, `mlg-ticon` icon
+  actions, click-to-edit address cells));
+  type-check + build green.
+  **Testing:** new `e2e-users-addresses-test.js` (25 checks —
+  both blocks round-trip, trim/clear semantics, validation,
+  whitelist smuggle test, NO_STAFF_RECORD, me-scoping against
+  a second clinician's row, event payload carries no address
+  values, manager PUT carries office_*) plus regressions —
+  platform 90/90, appointments, users, users-mgmt, expenses,
+  patient-merge, tasks, patients core — green as superuser
+  AND as the limited `patient_api` user on fresh DBs; the
+  full schema chain applies cleanly and the migration ran
+  3× idempotent. (Suite-running note: the event-CHECK wideners
+  must apply in the order mileage-chains → patient-merge →
+  tasks → platform → contact-sync — contact-sync holds the
+  complete event list and tasks' list predates the platform
+  events; applying tasks after platform breaks episode
+  creation on a fresh DB.) Dashboard build stamp
+  `mw4koewx-mf69ar`, bundle `index-DSfF9iiL.js`, grepped for
+  the card markers ("Add office address",
+  "/users/me/addresses", "office_street"). **Deployed
+  2026-11-06:** API — new `routes/users.js` installed on
+  the VM (previous file kept as
+  `routes/users.js.bak-2026-11-05-deploy40`),
+  `schema-users-office.sql` applied as postgres (four
+  ALTER TABLE notices, no errors), `patient-api`
+  restarted; verified `https://api.marcinnotech.net/health`
+  returns ok and `/users/me` returns 401 unauthenticated.
+  Dashboard — Cloudflare Pages production deployment
+  `c9f93746` (direct upload of a FLAT zip: the contents of
+  `dist/` at the zip root; two earlier uploads of the
+  folder-shaped zip served the build only under `/dist/`
+  and were superseded); live bundle `index-BIl3VZh-.js`
+  (the final hash after all of this round's addenda)
+  verified serving at the `marcinnotech-app.pages.dev`
+  root and on `admin.marcinnotech.net`.
+
 ## 2026-11-04
 
+- **Admin-origin CORS hotfix — LIVE as deploy-39,
+  2026-11-04.** Jake's first sign-in to the console (after
+  the Firebase authorized-domain fix, below) reached the
+  probe and failed with "The API didn't answer": the API's
+  CORS allowlist (`DASHBOARD_ORIGIN` env, comma-separated)
+  predated the admin subdomain, so the browser blocked the
+  `/admin/overview` call. Fix was env-only, no code change:
+  `DASHBOARD_ORIGIN` on the VM now reads
+  `https://marcinnotech-app.pages.dev,https://admin.marcinnotech.net`
+  (.env backed up as `.env.bak-2026-11-04-deploy39`), service
+  restarted healthy; preflight checks verified for BOTH
+  origins (204 + matching allow-origin). Same round, the
+  other half of the new-hostname lesson: `admin.
+  marcinnotech.net` was added to the Firebase project's
+  Authentication authorized domains (Google sign-in had
+  failed with a generic error until then; email/password
+  was unaffected). New-hostname launches now have a
+  two-item checklist: Firebase authorized domain + API
+  CORS origin.
 - **Admin console — LIVE as deploy-38, 2026-11-04.** Spec:
   `admin-site-spec.md` (Jake's direction: an administrators-only
   site on its own subdomain for user management + site

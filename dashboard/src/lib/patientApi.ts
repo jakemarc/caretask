@@ -891,6 +891,10 @@ export interface ApiUser {
   city: string | null;
   state: string | null;
   zip: string | null;
+  office_street: string | null;
+  office_city: string | null;
+  office_state: string | null;
+  office_zip: string | null;
   phone: string | null;
   phonecell: string | null;
   fax: string | null;
@@ -930,6 +934,32 @@ export async function fetchMyStaffRecord(
   user: User,
 ): Promise<ApiUser | null> {
   return (await apiFetch(user, "/users/me")) as ApiUser | null;
+}
+
+// The caller's own home + office addresses (PUT /users/me/addresses,
+// self-service). Home rides street/city/state/zip; office has its
+// own office_* fields. Send only the block being saved; a blank
+// string or null clears the field server-side. The Mileage page
+// uses the pair as the day's bookends.
+export interface MyAddressesInput {
+  street?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zip?: string | null;
+  office_street?: string | null;
+  office_city?: string | null;
+  office_state?: string | null;
+  office_zip?: string | null;
+}
+
+export async function updateMyAddresses(
+  user: User,
+  input: MyAddressesInput,
+): Promise<ApiUser> {
+  return (await apiFetch(user, "/users/me/addresses", {
+    method: "PUT",
+    body: JSON.stringify(input),
+  })) as ApiUser;
 }
 
 // Create a staff member. ROLE-GATED (manager/admin).

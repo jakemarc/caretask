@@ -6,6 +6,9 @@ import { COLOR_THEMES, type ColorTheme, type Theme } from "../lib/theme";
 import Mark from "../components/Mark";
 import AddressAutocomplete from "../components/AddressAutocomplete";
 import ExpensesView from "../components/ExpensesView";
+import ConcurExportCard from "../components/ConcurExportCard";
+import { fetchMileageReport } from "../lib/expensesApi";
+import { downloadConcurCsv } from "../lib/concurCsv";
 import StateSelect from "../components/StateSelect";
 import {
   BarChart3,
@@ -17,6 +20,7 @@ import {
   CalendarPlus,
   Cake,
   ChevronDown,
+  ChevronRight,
   ChevronsLeft,
   ChevronsRight,
   ClipboardCheck,
@@ -95,6 +99,11 @@ import AgencyPicker from "../components/AgencyPicker";
 import AgencyDirectorySettings from "../components/AgencyDirectorySettings";
 import CsvImport from "../components/CsvImport";
 import { MyAgenciesCard } from "../components/PlatformSettings";
+import { HomeOfficeCard } from "../components/HomeOfficeSettings";
+import {
+  ExpensePolicyCard,
+  MileageRatesCard,
+} from "../components/ExpenseAdminSettings";
 import { PhoneContactsCard } from "../components/PhoneContactsSettings";
 import EpisodeCard from "../components/EpisodeCard";
 import type { ContactCandidate } from "../lib/googleContacts";
@@ -464,6 +473,27 @@ export default function Dashboard({
   >("active");
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
   const [expensesAutoOpen, setExpensesAutoOpen] = useState(false);
+  // Reports submenu (Jake, 2026-11-06): the sidebar Reports
+  // button carries an Expenses submenu (Mileage Report +
+  // Generate Concur Report). Expansion is automatic on the
+  // Reports tab (or when Expenses was opened from the
+  // submenu); clicking Reports while already there toggles it
+  // via this override, which resets whenever the tab changes.
+  const [reportsMenuToggled, setReportsMenuToggled] = useState<
+    boolean | null
+  >(null);
+  const [expensesViaReports, setExpensesViaReports] = useState(false);
+  // Bumped on every "Mileage Report" submenu click; ExpensesView
+  // scrolls its Expense report card into view when it changes.
+  const [focusReportNonce, setFocusReportNonce] = useState(0);
+  const [concurBusy, setConcurBusy] = useState(false);
+  // Minimal app toast (2026-11-06): used by the Generate
+  // Concur Report action for now; auto-dismisses after ~6s.
+  const [toast, setToast] = useState<{
+    kind: "success" | "error";
+    text: string;
+  } | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
   const listSearchRef = useRef<HTMLInputElement>(null);
   // Mobile profile swipe (2026-11-02): touch origin for the
   // profile card + the direction the current card slid in from.
@@ -2000,6 +2030,89 @@ export default function Dashboard({
       ? "Patient Profile"
       : (TAB_TITLES[tab] ?? tab.charAt(0).toUpperCase() + tab.slice(1));
 
+  // The Reports submenu toggle override lasts only while the
+  // user stays on the tab they toggled it from.
+  useEffect(() => {
+    setReportsMenuToggled(null);
+  }, [tab]);
+
+  // Clear any pending toast auto-dismiss on unmount.
+  useEffect(
+    () => () => {
+      if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    },
+    [],
+  );
+
+  // Reports submenu expansion: automatic on the Reports tab or
+  // when Expenses was opened from the submenu; the toggle
+  // override applies until the next tab change.
+  const reportsExpanded =
+    reportsMenuToggled ??
+    (tab === "reports" || (tab === "expenses" && expensesViaReports));
+
+  const showToast = (kind: "success" | "error", text: string) => {
+    setToast({ kind, text });
+    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = window.setTimeout(() => setToast(null), 6000);
+  };
+
+  const openMileageReport = () => {
+    setExpensesViaReports(true);
+    setExpensesAutoOpen(false);
+    setFocusReportNonce((n) => n + 1);
+    setTab("expenses");
+  };
+
+  // Reports submenu → Generate Concur Report (Jake, 2026-11-06):
+  // the one-click shortcut — current calendar month, all
+  // agencies, CSV downloads immediately. Custom period/agency
+  // exports stay on the Reports view's ConcurExportCard.
+  const generateConcurReport = async () => {
+    if (concurBusy) return;
+    if (apiStatus !== "connected") {
+      showToast("error", "Not connected to the API.");
+      return;
+    }
+    setConcurBusy(true);
+    try {
+      const now = new Date();
+      const y = now.getFullYear();
+      const m = `${now.getMonth() + 1}`.padStart(2, "0");
+      const last = `${new Date(y, now.getMonth() + 1, 0).getDate()}`.padStart(
+        2,
+        "0",
+      );
+      const rep = await fetchMileageReport(user, {
+        from: `${y}-${m}-01`,
+        to: `${y}-${m}-${last}`,
+        agency_id: null,
+      });
+      const fallbackRate =
+        parseFloat(localStorage.getItem("caretask-mileage-rate") ?? "0.70") ||
+        0.70;
+      const stats = downloadConcurCsv(rep, fallbackRate);
+      showToast(
+        "success",
+        `Concur CSV downloaded — ${stats.entries} mileage ${stats.entries === 1 ? "entry" : "entries"}, ` +
+          `${Math.round(stats.miles * 100) / 100} mi` +
+          (stats.expense_count
+            ? `, plus ${stats.expense_count} expense ${stats.expense_count === 1 ? "line" : "lines"}`
+            : "") +
+          `, $${(stats.cents / 100).toFixed(2)} total. Personal (commute) legs are excluded.`,
+      );
+    } catch (err) {
+      showToast(
+        "error",
+        err instanceof Error && err.message
+          ? err.message
+          : "Could not generate the Concur report.",
+      );
+    } finally {
+      setConcurBusy(false);
+    }
+  };
+
   return (
     <div
       className={
@@ -2241,12 +2354,59 @@ export default function Dashboard({
           <nav className="sidebar-nav" aria-label="Record sections">
             <button
               className={tab === "reports" ? "nav-btn active" : "nav-btn"}
-              onClick={() => setTab("reports")}
+              onClick={() => {
+                // Reports (Jake, 2026-11-06): navigating here
+                // expands the Expenses submenu below; clicking
+                // again while already on Reports toggles it.
+                if (tab === "reports") {
+                  setReportsMenuToggled(!reportsExpanded);
+                } else {
+                  setTab("reports");
+                }
+              }}
               title="Reports"
+              aria-expanded={reportsExpanded}
             >
               <span className="nav-icon"><BarChart3 size={20} /></span>
               <span className="nav-label">Reports</span>
+              <span className="nav-chevron">
+                {reportsExpanded ? (
+                  <ChevronDown size={16} />
+                ) : (
+                  <ChevronRight size={16} />
+                )}
+              </span>
             </button>
+            {/* Reports submenu (Jake, 2026-11-06): Expenses
+                shortcuts — Mileage Report lands on the Expenses
+                tab's report card; Generate Concur Report is an
+                action that downloads the current month's CSV
+                on click (custom periods live on the Reports
+                view's export card). */}
+            {reportsExpanded && (
+              <div className="nav-submenu">
+                <p className="nav-submenu-label">Expenses</p>
+                <button
+                  type="button"
+                  className={
+                    tab === "expenses" && expensesViaReports
+                      ? "nav-sub-btn active"
+                      : "nav-sub-btn"
+                  }
+                  onClick={openMileageReport}
+                >
+                  Mileage Report
+                </button>
+                <button
+                  type="button"
+                  className="nav-sub-btn"
+                  onClick={() => void generateConcurReport()}
+                  disabled={concurBusy}
+                >
+                  {concurBusy ? "Generating…" : "Generate Concur Report"}
+                </button>
+              </div>
+            )}
             {/* Expenses (Jake, 2026-11-01): a direct button
                 under Record, same treatment as Patients —
                 monthly expense reports with mileage live
@@ -2254,6 +2414,7 @@ export default function Dashboard({
             <button
               className={tab === "expenses" ? "nav-btn active" : "nav-btn"}
               onClick={() => {
+                setExpensesViaReports(false);
                 setExpensesAutoOpen(false);
                 setTab("expenses");
               }}
@@ -4697,6 +4858,18 @@ export default function Dashboard({
                   user={user}
                   apiConnected={apiStatus === "connected"}
                 />
+                <HomeOfficeCard
+                  user={user}
+                  apiConnected={apiStatus === "connected"}
+                />
+                <MileageRatesCard
+                  user={user}
+                  apiConnected={apiStatus === "connected"}
+                />
+                <ExpensePolicyCard
+                  user={user}
+                  apiConnected={apiStatus === "connected"}
+                />
                 {/* Invites moved to the admin console
                     (admin.marcinnotech.net) in deploy-38,
                     per admin-site-spec.md §8d. */}
@@ -4877,6 +5050,7 @@ export default function Dashboard({
               people={people}
               apiConnected={apiStatus === "connected"}
               autoOpenCurrent={expensesAutoOpen}
+              focusReportNonce={focusReportNonce}
             />
           )}
 
@@ -4892,6 +5066,7 @@ export default function Dashboard({
                   Download PDF
                 </button>
               </div>
+              <ConcurExportCard user={user} />
               <div className="stat-grid">
                 <div className="stat-card">
                   <Users size={20} className="stat-icon" />
@@ -5259,6 +5434,7 @@ export default function Dashboard({
           type="button"
           className={tab === "expenses" ? "mp-item active" : "mp-item"}
           onClick={() => {
+            setExpensesViaReports(false);
             setExpensesAutoOpen(true);
             setTab("expenses");
           }}
@@ -5275,6 +5451,22 @@ export default function Dashboard({
           <span>Calendar</span>
         </button>
       </nav>
+      {/* App toast (2026-11-06): minimal fixed toast driven by
+          Dashboard state; first user is the Reports submenu's
+          Generate Concur Report action. Auto-dismisses ~6s. */}
+      {toast && (
+        <div className={`app-toast app-toast-${toast.kind}`} role="status">
+          <span>{toast.text}</span>
+          <button
+            type="button"
+            className="app-toast-close"
+            onClick={() => setToast(null)}
+            aria-label="Dismiss"
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
     </div>
   );
 }

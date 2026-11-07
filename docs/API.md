@@ -110,6 +110,7 @@ the patient's agency history.
 | `GET /users/me/agencies` | **Platform (Live, deploy-35):** my agency memberships (light rows: id, name, display_name, city, state) |
 | `POST /users/me/agencies` | **Platform (Live, deploy-35):** join an agency `{agency_id}` |
 | `DELETE /users/me/agencies/:agencyId` | **Platform (Live, deploy-35):** leave an agency (409 `PRIMARY_ON_ACTIVE_EPISODE`) |
+| `PUT /users/me/addresses` | **Home & Office (deploy-40, built locally 2026-11-05 — deploy pending):** self-service write of the caller's OWN addresses — home block `{street, city, state, zip}` and/or office block `{office_street, office_city, office_state, office_zip}` (migration `schema-users-office.sql`). Values must be strings or null; trimmed, blank/null clears the field; unknown fields ignored (whitelist). 400 `VALIDATION` on a non-string value or a body with no address fields; 403 `NO_STAFF_RECORD` without an active staff row. Me-scoped by construction (the update targets the resolved caller row). Returns the updated SAFE_COLUMNS row — `office_*` joined SAFE_COLUMNS and the WRITABLE whitelist in the same round, so `GET /users/me` and the manager-gated `PUT /users/:id` carry them too. Logs `admin_action` (`user_update`) with the touched field NAMES only — never address values. The pair are the Mileage day's bookends (see the mileage section) |
 | `POST /invites` | **Platform (Live, deploy-35): platform admin** — create an invite `{email, role}`; the raw `code` + `accept_path` return ONCE (only the SHA-256 hash is stored); 7-day expiry; 409 `ALREADY_STAFF` |
 | `GET /invites` | **Platform (Live, deploy-35): platform admin** — invites with derived status (pending/accepted/revoked/expired) |
 | `DELETE /invites/:id` | **Platform (Live, deploy-35): platform admin** — revoke a pending invite |
@@ -193,7 +194,11 @@ entries) was wiped at Jake's direction — it was
 form-testing data — so the log starts clean.
 
 Simplified 2026-11-02 (Jake): NO approval process. Mileage is
-a per-clinician DAY LOG of legs (a chain), top-level since
+a per-clinician DAY LOG of legs (a chain) — still the core
+model; deploy-41 (2026-11-06, local only) adds receipts,
+rates, expense lines, policy, and OPTIONAL saved reports
+with approvals on top (see the deploy-41 subsection below).
+The day log is, top-level since
 `schema-mileage-chains.sql` (legs carry `user_id`, `agency_id`,
 `patient_id`, `start_label`/`end_label`; `expense_report_id`
 is nullable and legacy-only). Mounted at root in server.js.
@@ -227,19 +232,110 @@ row (403 `NO_STAFF_RECORD` otherwise).
   null; both failing -> 502 `ROUTE_FAILED`). Coordinates
   only; demo-grade by design — miles are always
   hand-enterable.
-- LEGACY envelope reads (read-only, pre-simplification
-  monthly reports): `GET /expense-reports` (own; managers
-  everyone's) and `GET /expense-reports/:id` with the
-  ORIGINAL summary math (daily reimbursable = max(0,
-  driven - commute); dollars per the all-rated day rule).
-  All envelope writes, the submit/approve/reject/pay
-  lifecycle, and the non-mileage expense-line endpoints are
-  REMOVED (404); the tables and their data stay untouched.
-  Non-mileage lines are parked with the envelopes.
+- LEGACY envelope reads: `GET /expense-reports` (own;
+  managers everyone's) and `GET /expense-reports/:id`. For
+  pre-simplification rows (`model = 'legacy'`) the detail
+  keeps the ORIGINAL summary math (daily reimbursable =
+  max(0, driven - commute); dollars per the all-rated day
+  rule). Deploy-41 (below) revives envelope WRITES for new
+  reports; legacy rows stay read-only in practice (they hold
+  no chain links).
 - Events: `expense_change` with ids + action only — never
-  addresses, amounts, or notes. Suite:
-  `e2e-expenses-test.js` (45 checks, all passing locally
-  2026-11-02).
+  addresses, amounts, notes, or file contents. Suites:
+  `e2e-expenses-test.js` (43 checks) and
+  `e2e-expense-upgrade-test.js` (104 checks), all passing
+  locally 2026-11-06 as superuser and as `patient_api`.
+
+### Deploy-41 Concur-style upgrade (built locally 2026-11-06 — NOT deployed)
+
+Five additions on the model above; migrations
+`schema-expense-itemization.sql`, `schema-expense-receipts.sql`,
+`schema-mileage-rates.sql`, `schema-expense-policy.sql`,
+`schema-expense-approvals.sql`, applied in that order after
+`schema-mileage-chains.sql`. Legs and expense lines now carry
+a `receipt_count` in their reads.
+
+- **Receipts** — file bytes in Postgres (`expense_receipts.data`
+  BYTEA, exactly one parent: a mileage leg XOR an expense
+  line) so the nightly DB backup covers them. Upload is
+  base64 JSON (no multipart dependency); `server.js` mounts a
+  scoped 12 MB JSON parser for `/mileage`, `/expenses`,
+  `/expense-receipts` ahead of the global parser. Mime
+  allowlist jpeg / png / webp / pdf, verified against the
+  file magic bytes; 8 MiB decoded cap. `POST
+  /mileage/:id/receipts` · `POST /expenses/:id/receipts`
+  (owner-only; body `{filename?, mime_type, content_base64}`;
+  **201** metadata only — never the bytes; 400
+  `RECEIPT_TYPE_INVALID` / `RECEIPT_TOO_LARGE`). `GET
+  /mileage/:id/receipts` · `GET /expenses/:id/receipts`
+  (metadata list, newest first; owner or manager/admin, else
+  404). `GET /expense-receipts/:id/content` (the file, stored
+  Content-Type, `Content-Disposition: attachment`; owner or
+  manager/admin, else 404). `DELETE /expense-receipts/:id`
+  (owner-only soft delete). `expenses.receipt_url` is
+  superseded by this table and left in place.
+- **Rate table** — `mileage_rates` (`rate`, `effective_from`,
+  `effective_to` recomputed on insert so ranges never
+  overlap). `GET /mileage-rates` (newest effective first);
+  `GET /mileage-rates/resolve?date=YYYY-MM-DD` -> `{rate}`
+  (null when no row covers the date). `POST /mileage-rates`
+  (manager/admin only; a duplicate `effective_from` is **409
+  `RATE_DATE_EXISTS`** — history is never edited or deleted,
+  only superseded). The dashboard day log defaults to the
+  resolved rate for the entry's date; saved legs keep their
+  snapshot and the localStorage page rate is only a fallback
+  when the table has no covering row.
+- **Receipt policy** — platform-level singleton
+  (`expense_settings`, id 1), chosen over per-agency settings
+  because saved reports can span agencies (a per-agency
+  override is the documented future path). `GET
+  /expense-policy` -> `{require_receipts,
+  receipt_threshold_cents}` (threshold null = every line
+  needs a receipt; otherwise only lines at/above it; commute
+  legs never require one; a leg's value is miles x its rate
+  snapshot, 0 when unrated). `PUT /expense-policy`
+  (manager/admin only).
+- **Non-mileage expense lines (itemization)** — `expenses.report_id`
+  is nullable since deploy-41; day-flow lines are unattached
+  until a saved report links them. `GET
+  /expenses?user_id=&from=&to=&agency_id=`; `POST /expenses`
+  `{expense_date, category, amount_cents, vendor?, note?,
+  payment_method?, agency_id?}`; `PUT|DELETE /expenses/:id`
+  (owner-only). UI categories: `tolls | parking | meals |
+  supplies | other` (the stored CHECK also still accepts the
+  legacy values). The generated report adds `expenses`,
+  `expenses_amount_cents`, `grand_total_amount_cents`
+  (mileage + expenses), `policy`, and `receipt_violations`;
+  its `total_amount_cents` keeps the pre-41 mileage-only
+  meaning.
+- **Saved reports & approvals** — `expense_reports.model`:
+  `chain` for reports saved by the current flow, `legacy`
+  for pre-Deploy-27 rows (legacy detail keeps the old math;
+  chain detail uses the chain math — days, linked `expenses`,
+  `mileage_amount_cents`, `expenses_amount_cents`, grand
+  `total_amount_cents`). `POST /expense-reports`
+  `{period_start, period_end, agency_id?}` creates a DRAFT
+  for the caller and links their still-unlinked legs + lines
+  in the period (agency filter when given); **409
+  `REPORT_EXISTS`** (+ `existing_id`) when a draft already
+  covers the same user/period/agency; **400 `REPORT_EMPTY`**
+  when nothing is linkable. `POST /expense-reports/:id/transition`
+  `{to, note?, payment_ref?}`: draft->submitted (owner),
+  submitted->approved / submitted->rejected (manager/admin),
+  rejected->draft (owner), approved->paid (manager/admin,
+  optional `payment_ref`); anything else is **409
+  `TRANSITION_INVALID`**. A manager may NOT approve / reject
+  / pay their OWN report — **403 `SELF_APPROVAL`** (the
+  pre-Deploy-27 rule, reinstated). Submitting with
+  receipt-policy violations is **422 `RECEIPTS_REQUIRED`**
+  with `violations: [{kind, id, date}]` (ids + dates only).
+  Every transition appends an `expense_report_events` row
+  (actor, from->to, note, timestamp); `GET
+  /expense-reports/:id` always includes `events` (oldest
+  first) and the list includes `model`. LOCKING: legs and
+  lines linked to a report in submitted / approved / paid
+  reject edits, deletes, and receipt changes with **409
+  `REPORT_LOCKED`**; draft / rejected stay editable.
 
 ## Patient merge (routes/patientMerge.js, mounted at /patient-merge) — Live 2026-11-02 (deploy-28)
 

@@ -93,6 +93,9 @@ if (allowedOrigins.length === 0) {
   );
 }
 
+// Receipt uploads are base64 JSON; 8 MiB file ≈ 10.7 MiB base64,
+// so the expense paths get a larger parser before the global one.
+app.use(['/mileage', '/expenses', '/expense-receipts'], express.json({ limit: '12mb' }));
 app.use(express.json());
 
 // Request logging wraps every route below it (including failed-auth

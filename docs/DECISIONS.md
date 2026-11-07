@@ -231,3 +231,26 @@ spec-first suite `e2e-admin-test.js` at 41/41 plus full
 regressions; dashboard AdminApp with the named
 "Administrators only" wall; DNS CNAME + Pages custom domain
 active.
+
+## 2026-11-05 — Incorporate now, via Stripe Atlas
+
+Jake asked the affordability question (Atlas $500 one-time,
+~$425–550/yr carrying costs, vs the Phase 0–1 <$50/mo running
+cap), whether no-profits-yet changes the answer, and whether
+a card can pay. On Milo's recommendation he approved with
+"go": **incorporate Marc Innovative Technologies as a
+Delaware C-Corp via Stripe Atlas now**, inside Phase 0
+(closes Nov 7), while the company is worth nothing — the
+founder stock prices at par (~$800 for 8M of 10M authorized
+shares at $0.0001 par), the 83(b) tax is ~zero, and the
+QSBS clock starts. Paid on Jake's personal card; the company
+reimburses him once its bank account opens. Prep sheet:
+`incorporation-atlas-prep.md`. Standing follow-ups: verify
+the 83(b) is filed within 30 days of the stock grant,
+Illinois foreign qualification, Delaware annual report +
+franchise tax every March 1.
+
+## 2026-11-06
+- **Kierto is the wedge product for the whole system (Jake, 2026-11-06):** the standalone mileage app (working name Kierto, pending formal trademark/domain checks) is marketed on its own, but it is DESIGNED to make its users want CareTask: one shared account and data model; standalone mode works fully with typed stop labels, while linking CareTask visibly upgrades the same screens — real patient list + search, nearest-home locate, calendar-driven days, episodes and team/agency workflows. Kierto is the top of the funnel; CareTask is the destination. Marketing + pricing live in `mileage-app-marketing.md`.
+- **Deploy-41 Concur-style expense upgrade — design calls (Milo, executing Jake's 2026-11-05 approval):** receipt files stored as Postgres BYTEA in `expense_receipts` (nightly DB backups stay atomic; no VM uploads dir, no new dependencies — base64 JSON upload). Receipt-required policy is PLATFORM-level (singleton `expense_settings`), not per-agency, because saved reports can span agencies; a per-agency override is the future path if Jake wants it. Approval history lives in a dedicated `expense_report_events` table (queryable per report, rendered as a timeline). Saved reports are marked `model='chain'` on `expense_reports`; pre-Deploy-27 rows stay `legacy` with their original math. Legs/lines on a submitted-or-later report are locked against edits (`REPORT_LOCKED`).
+- **SELF_APPROVAL reinstated (Milo's call, flagged to Jake):** the pre-Deploy-27 rule — a manager/admin cannot approve, reject, or pay their OWN expense report (403 `SELF_APPROVAL`) — was revived with the approval lifecycle, matching the dashboard copy that already described it. Flagged because it can block a solo manager from processing their own reports. **Jake's decision (2026-11-06): KEEP the block.** He accepts that, as the only manager, his own reports cannot be approved/paid for now; a future feature will address the solo-manager case (shape TBD — e.g., a second approver or an owner path). Do not drop the block without his say-so.

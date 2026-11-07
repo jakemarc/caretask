@@ -3899,9 +3899,46 @@ label.contact-picker-row {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* The stop's address (or its label, when there's no
+   address yet) is the edit tap target in the list — no
+   Edit button (Jake, 2026-11-06). A bare button reset,
+   full column width so long addresses still ellipsize,
+   with vertical padding for a comfortable touch target. */
+.mlg-stop-tap {
+  display: block;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 7px 0;
+  margin: -4px 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.mlg-stop-tap .mlg-stop-addr {
+  display: block;
+}
 .mlg-stop-actions {
   display: flex;
   gap: 6px;
+}
+/* Per-row insert (Jake, 2026-11-06): a small round +
+   at the end of a list stop row inserts a new stop
+   directly below that row. 36px hit area. */
+.mlg-stop-add {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex: none;
 }
 .mlg-editor {
   grid-column: 1 / -1;
@@ -3994,27 +4031,274 @@ label.contact-picker-row {
   background: var(--panel);
   color: var(--text);
 }
-.mlg-seg {
+/* Click-to-edit miles (Jake, 2026-11-06): the leg's
+   effective miles as bold text with a dotted underline in
+   both the chain list and the desktop table; the input
+   only appears while editing. The "Edited" flag pill
+   reuses the billable badge's colors; the routed hint
+   matches .mlg-leg-note's muted small text. */
+.mlg-miles-editwrap {
   display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.mlg-miles-text {
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  background: none;
+  border: 0;
+  border-bottom: 1px dotted var(--muted);
+  padding: 2px 1px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.mlg-miles-text:hover {
+  color: var(--teal);
+  border-bottom-color: var(--teal);
+}
+.mlg-miles-empty {
+  color: var(--muted);
+}
+.mlg-miles-input {
+  width: 74px;
+  font-size: 15px;
+  font-weight: 700;
+  text-align: right;
+  padding: 6px 8px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  overflow: hidden;
+  background: var(--panel);
+  color: var(--text);
 }
-.mlg-seg button {
-  border: 0;
+.mlg-miles-flag {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--nav-active-bg);
+  color: var(--nav-active-text);
+  white-space: nowrap;
+}
+.mlg-miles-routed {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.mlg-toll {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
   background: var(--panel);
   padding: 6px 11px;
   font-size: 12.5px;
   font-weight: 600;
   color: var(--muted);
   cursor: pointer;
+  user-select: none;
 }
-.mlg-seg button.on {
-  background: var(--teal);
-  color: #fff;
+.mlg-toll input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--teal);
+  cursor: pointer;
 }
-.mlg-seg button.on.alt {
-  background: var(--amber);
+.mlg-toll:has(input:checked) {
+  color: var(--teal);
+  border-color: var(--teal);
+}
+.mlg-addr-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+.mlg-addr-row .addr-wrap {
+  flex: 1;
+  min-width: 0;
+}
+.mlg-locate-btn {
+  flex: none;
+  width: 40px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--teal);
+}
+.mlg-locate-btn:disabled {
+  opacity: 0.55;
+}
+.mlg-near-note {
+  color: var(--teal);
+  font-weight: 600;
+}
+.mlg-chain-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px 2px;
+}
+.mlg-chain-title {
+  font-size: 14px;
+  font-weight: 700;
+}
+.mlg-bookends-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+.mlg-bookends-toggle input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--teal);
+  cursor: pointer;
+}
+.mlg-stop:has(> .mlg-grip) {
+  grid-template-columns: auto 1fr auto;
+}
+.mlg-grip {
+  touch-action: none;
+  cursor: grab;
+  background: none;
+  border: 0;
+  color: var(--muted);
+  padding: 6px 2px;
+  display: inline-flex;
+  align-items: center;
+}
+.mlg-grip:active {
+  cursor: grabbing;
+}
+.mlg-row-dragging {
+  background: var(--panel-2);
+  border-radius: 10px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+  opacity: 0.97;
+}
+/* Desktop table rendering of the chain (wide breakpoint,
+   Jake, 2026-11-06): one row per stop, the incoming leg in
+   its own column; the list rendering below the breakpoint
+   is untouched. Fluid columns — the table is 100% of its
+   card and the address column absorbs the slack (ellipsis
+   when narrow); horizontal scroll, if ever needed, is
+   confined to the wrapper. */
+.mlg-table-wrap {
+  overflow-x: auto;
+  padding: 6px 16px 10px;
+}
+.mlg-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 13.5px;
+}
+.mlg-table col.mlg-col-grip {
+  width: 38px;
+}
+.mlg-table col.mlg-col-kind {
+  width: 92px;
+}
+.mlg-table col.mlg-col-stop {
+  width: 22%;
+}
+.mlg-table col.mlg-col-leg {
+  width: 38%;
+}
+.mlg-table col.mlg-col-actions {
+  width: 138px;
+}
+.mlg-table th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.mlg-table td {
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.mlg-table-grip {
+  text-align: center;
+}
+.mlg-table-addr {
+  color: var(--muted);
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Table row actions (Jake, 2026-11-06): three Lucide
+   icon buttons — insert below (+), edit (pencil),
+   delete (trash) — sharing one style, at parity with
+   the list's per-row insert. */
+.mlg-ticon {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex: none;
+}
+/* The list's .mlg-stop-tap reused as a table cell's
+   click-to-edit target: drop the list's touch padding
+   and let the text ellipsize inside the cell. */
+.mlg-table-stop .mlg-stop-tap,
+.mlg-table-addr .mlg-stop-tap {
+  padding: 0;
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mlg-table-legcell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+/* Dragging a table row: transform does not apply reliably
+   to <tr>, so the lifted state is a tinted background plus
+   an accent frame drawn with cell borders (which render
+   reliably in Chromium); the row itself moves because
+   swaps reorder live past the neighbor's half-height,
+   exactly as in the list. */
+.mlg-trow-dragging td {
+  background: var(--panel-2);
+  border-top: 2px solid var(--teal);
+  border-bottom: 2px solid var(--teal);
+}
+.mlg-trow-dragging td:first-child {
+  border-left: 2px solid var(--teal);
+}
+.mlg-trow-dragging td:last-child {
+  border-right: 2px solid var(--teal);
+}
+.mlg-table-editor-row td {
+  padding: 10px;
+  background: var(--panel-2);
 }
 .mlg-leg-note {
   font-size: 12px;
@@ -4126,6 +4410,28 @@ label.contact-picker-row {
   margin-top: 6px;
 }
 @media (max-width: 720px) {
+  /* Mobile: the chain's Add-a-stop collapses to a round +
+     button inline at the end of the chain (Jake, 2026-11-06);
+     the label and hint only show on wider screens. */
+  .mlg-addstop {
+    justify-content: flex-end;
+    padding: 8px 16px 12px;
+  }
+  .mlg-addstop .mlg-hint {
+    display: none;
+  }
+  .mlg-addstop-btn {
+    width: 42px;
+    height: 42px;
+    padding: 0;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .mlg-addstop-text {
+    display: none;
+  }
   .mlg-totals {
     grid-template-columns: 1fr 1fr;
   }
@@ -5041,4 +5347,264 @@ label.contact-picker-row {
   .app-shell:not(.force-desktop) .cal-book-head {
     scroll-margin-top: 84px;
   }
+}
+
+/* Reports → Exports card (Concur CSV, 2026-11-06): reuse the
+   mileage controls layout inside a plain dashboard card. */
+.rpt-export { margin-bottom: 16px; }
+.rpt-export h2 { font-size: 16px; margin-bottom: 2px; }
+.rpt-export h3 { font-size: 13.5px; margin: 10px 0 4px; }
+.rpt-export .mlg-controls { padding: 10px 0 0; margin-bottom: 0; }
+.rpt-export .exp-notice,
+.rpt-export .exp-error { margin-top: 12px; }
+
+/* ---------- Reports sidebar submenu + app toast (Jake, 2026-11-06) ----------
+   The Reports nav button carries a chevron and an Expenses
+   submenu (.nav-submenu / .nav-sub-btn above). The submenu's
+   group label and the chevron treatment live here; the toast is
+   Dashboard's minimal fixed notice (first user: the submenu's
+   Generate Concur Report action). */
+.nav-submenu-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 4px 0 2px 12px;
+}
+
+.nav-btn .nav-chevron {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  color: var(--muted);
+}
+
+.sidebar.collapsed .nav-chevron {
+  display: none;
+}
+
+.nav-sub-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.app-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: min(560px, calc(100vw - 32px));
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--teal);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(10, 25, 22, 0.28);
+  padding: 12px 14px;
+  font-size: 14px;
+}
+
+.app-toast-error {
+  border-left-color: var(--red);
+}
+
+.app-toast-close {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  flex: none;
+}
+
+@media (max-width: 720px) {
+  /* In the phone drawer the sidebar is a full vertical nav, so
+     the submenu shows there even though the ≤720 bottom-bar
+     rules hide it; lift the toast clear of the pill footer. */
+  .sidebar.mobile-open .nav-submenu {
+    display: flex;
+  }
+
+  .app-toast {
+    bottom: 92px;
+  }
+}
+
+/* ---- Deploy-41: receipts, itemized lines, saved reports ---- */
+.rcpt {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+.rcpt-btn {
+  position: relative;
+}
+.rcpt-badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 15px;
+  height: 15px;
+  border-radius: 999px;
+  background: var(--teal, #0f766e);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 15px;
+  text-align: center;
+  padding: 0 3px;
+}
+.rcpt-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 250px;
+  max-width: 340px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 13px;
+  white-space: normal;
+}
+.rcpt-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.rcpt-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.rcpt-meta {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+.rcpt-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rcpt-error {
+  display: block;
+  font-size: 12.5px;
+}
+.rcpt-upload {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+.rcpt-file {
+  display: none;
+}
+.exp-receipt-warn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+  color: var(--amber);
+  font-weight: 700;
+  font-size: 12px;
+}
+.exp-receipt-summary {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  flex-wrap: wrap;
+  background: var(--badge-amber-bg);
+  border: 1px solid var(--amber);
+  color: var(--amber);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 13.5px;
+  margin: 10px 0;
+}
+.exp-receipt-summary ul {
+  margin: 4px 0 0;
+  width: 100%;
+}
+.mlg-otherexp {
+  padding: 16px;
+  margin-bottom: 14px;
+}
+.mlg-otherexp h2 {
+  font-size: 16px;
+  margin-bottom: 6px;
+}
+.exp-line-row {
+  align-items: center;
+}
+.exp-line-actions {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.exp-line-form {
+  margin-top: 14px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+.exp-rate-row {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  margin: 6px 0;
+}
+.exp-status-draft {
+  background: var(--panel-2);
+  color: var(--muted);
+}
+.exp-status-rejected {
+  background: var(--badge-red-bg);
+  color: var(--red);
+}
+.exp-detail {
+  border-top: 2px solid var(--border);
+  margin-top: 14px;
+  padding-top: 12px;
+}
+.exp-detail-totals {
+  margin: 12px 0;
+}
+.exp-timeline-title {
+  font-size: 14.5px;
+  margin: 16px 0 8px;
+}
+.exp-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.exp-timeline-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 13.5px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 6px;
+}
+.exp-inline-input {
+  font-size: 14px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  min-width: 210px;
 }

@@ -44,6 +44,8 @@ server on its own port against a real Postgres, with stubbed auth):
 | `e2e-messages-test.js` | 3106 | staff resolution (NO_STAFF_RECORD), DM + chart messages, thread access rules, read receipts (idempotent), sender-only delete, message events carry no body (32 checks) |
 | `e2e-documents-test.js` | 3107 | staff resolution (NO_STAFF_RECORD), document create/list/get, template section validation, appointment-belongs-to-patient rule, draft edit, finalize locks editing (409 DOCUMENT_FINALIZED), PIN-gated delete + restore, document events carry no section content (38 checks) |
 | `e2e-agencies-test.js` | 3108 | migration idempotency, fixture sync counts/upserts/deactivation, same-stamp skip, display_name precedence (short_name → DBA → two words), list/search/primary, PIN gate matrix, is_primary exclusivity, local fields survive re-sync, fake-fetch live path, agency_sync events carry counts only, CMS enrichment (phone+zip / DBA name+zip match, ambiguous skipped, unmatched counted, `?service=` / `?min_rating=` filters, idempotent re-run) (55 checks) — run LAST: it TRUNCATEs event_log for a deterministic skip state |
+| `e2e-expenses-test.js` | 3111 | mileage day chains, bookends/commute split, generated report math, legacy envelope reads (43 checks; deploy-41 flipped its retired-write 404 checks — envelope create now answers 400 `REPORT_EMPTY` on an empty range) |
+| `e2e-expense-upgrade-test.js` | 3112 | deploy-41: receipts (magic bytes, size cap, round-trip), rate table + resolve, expense lines, receipt policy gate (422 `RECEIPTS_REQUIRED`), saved-report lifecycle + timeline, `SELF_APPROVAL`, `REPORT_LOCKED` (104 checks) |
 
 Schema apply order for a fresh test DB: schema.sql,
 schema-events.sql, schema-patients-v2.sql, schema-patients-map.sql,
@@ -51,7 +53,11 @@ schema-users.sql, schema-appointments.sql, schema-messages.sql,
 schema-documents.sql, schema-agencies.sql,
 schema-agencies-cms.sql (CMS enrichment columns; additive,
 applies twice cleanly), schema-patients-agency.sql (patient
-agency tag; FKs agencies, so it comes after them). Run each suite ONCE per fresh DB, and run
+agency tag; FKs agencies, so it comes after them). The
+deploy-41 expense files apply after schema-mileage-chains.sql
+in this order: schema-expense-itemization.sql,
+schema-expense-receipts.sql, schema-mileage-rates.sql,
+schema-expense-policy.sql, schema-expense-approvals.sql. Run each suite ONCE per fresh DB, and run
 `e2e-appointments-test.js` BEFORE `e2e-users-test.js`: the users
 suite leaves an active manager row holding demo PIN 1234, and
 PIN attribution takes the first matching manager — appointments'

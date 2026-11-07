@@ -193,6 +193,67 @@ export async function geocodeFreeText(
   return nominatimSearch(query);
 }
 
+/**
+ * Reverse-geocode a GPS point to a street address string
+ * ("123 Main St, Chicago, IL 62704"), or null when Nominatim
+ * has nothing usable. Shares the forward geocoder's ~1/sec
+ * courtesy chain so all Nominatim traffic stays spaced.
+ */
+export async function reverseGeocode(
+  lat: number,
+  lon: number,
+  zoom = 18,
+): Promise<string | null> {
+  const run = async () => {
+    const wait = 1100 - (Date.now() - lastGeocodeAt);
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    lastGeocodeAt = Date.now();
+    try {
+      const params = new URLSearchParams({
+        format: "jsonv2",
+        lat: String(lat),
+        lon: String(lon),
+        addressdetails: "1",
+        zoom: String(zoom),
+      });
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?${params}`,
+        { headers: { Accept: "application/json" } },
+      );
+      if (!res.ok) return null;
+      const data = (await res.json()) as {
+        display_name?: string;
+        address?: {
+          house_number?: string;
+          road?: string;
+          city?: string;
+          town?: string;
+          village?: string;
+          hamlet?: string;
+          state?: string;
+          postcode?: string;
+        };
+      };
+      const a = data.address;
+      if (a?.road) {
+        const street = [a.house_number, a.road].filter(Boolean).join(" ");
+        const city = a.city ?? a.town ?? a.village ?? a.hamlet ?? "";
+        const stateZip = [a.state, a.postcode].filter(Boolean).join(" ");
+        return [street, city, stateZip].filter(Boolean).join(", ");
+      }
+      if (data.display_name) {
+        return data.display_name.split(",").slice(0, 3).join(",").trim();
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  };
+  const result = geocodeChain.then(run, run);
+  geocodeChain = result.catch(() => undefined);
+  return result;
+}
+
 // Deterministic small offset for pins that share identical
 // coordinates (the demo case: every Springfield/Example patient
 // falls back to the same ZIP centroid). Golden-angle spiral,

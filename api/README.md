@@ -71,6 +71,7 @@ fictional data, so they are proven before any real data arrives.
 | POST | `/patients/:id/restore` | Undo a soft delete: clears `deleted_at`. Returns the patient, 404 if not found, 409 if already active. **Manager PIN required** |
 | GET | `/users` | Staff directory (users table), safe columns only — `pin_hash` is never returned; rows carry `has_pin` instead |
 | GET | `/users/me` | The signed-in user's own users row, or `null` |
+| PUT | `/users/me/addresses` | Self-service: update the caller's own home (`street`/`city`/`state`/`zip`) and/or office (`office_*`, migration `schema-users-office.sql`) address fields. Strings trimmed, blank/null clears; 400 `VALIDATION` on a non-string value or empty body; 403 `NO_STAFF_RECORD` without an active staff row. Returns the updated row |
 | GET | `/users/clinicians` | Active users with `authorized = true` (assignable providers) |
 | POST | `/users/verify-pin` | `{ pin }` → `{ ok, manager }`. UX check for the dashboard's PIN prompt; the writes above re-check the PIN independently |
 | POST | `/users` | Create a staff member. **Manager-gated** (`X-Manager-Pin`). Optional `pin` in the body sets that member's own PIN (hashed). Duplicate email → 409 `EMAIL_EXISTS` |

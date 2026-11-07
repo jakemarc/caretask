@@ -1,6 +1,6 @@
 # Data Model
 
-Last updated: 2026-11-01
+Last updated: 2026-11-06
 Database: `caretask_demo` (PostgreSQL 16) on the API VM.
 Schemas (apply in this order): `patient-api/schema.sql`,
 `schema-events.sql`, `schema-patients-v2.sql`,
@@ -11,13 +11,19 @@ Schemas (apply in this order): `patient-api/schema.sql`,
 `schema-agencies-cms.sql`, `schema-patients-agency.sql`,
 `schema-patients-age.sql`, `schema-expense-reports.sql`,
 `schema-expenses.sql`, `schema-mileage-chains.sql`,
+`schema-expense-itemization.sql`, `schema-expense-receipts.sql`,
+`schema-mileage-rates.sql`, `schema-expense-policy.sql`,
+`schema-expense-approvals.sql` (the five deploy-41 files, in
+this order, after `schema-mileage-chains.sql`),
 `schema-patient-merge.sql`, `schema-tasks.sql`.
 
 Tables: `patients`, `users`, `appointment_categories`,
 `appointment_statuses`, `appointments`, `messages`, `documents`,
 `agencies`, `expense_reports`, `mileage_entries`, `expenses`,
+`expense_receipts`, `mileage_rates`, `expense_settings`,
+`expense_report_events`,
 `patient_merge_marks`, `patient_merges`, `clinician_tasks`,
-`audit_log`, `event_log` (16 in total).
+`audit_log`, `event_log`.
 
 ## patients (v2 — 48 columns)
 
@@ -76,7 +82,7 @@ Seed: 8 fictional patients (seed.js) — SSNs in the never-issued
 900-01-xxxx range, licenses literally `EXAMPLE-DL-000x`, 555 phone
 numbers, `.example` emails.
 
-## users (staff — 36 columns)
+## users (staff — 40 columns)
 
 Modeled on OpenEMR's `users` table core fields, plus the fields
 OpenEMR splits out that we keep inline. In OpenEMR, clinicians are
@@ -89,7 +95,7 @@ not a separate table — they are `users` rows with the `authorized`
 | Role & status | role (clinician / manager / admin / developer / support / billing / front_office; default clinician), authorized (bool — can be assigned patients), active (bool — deactivation instead of deletion). `position` (added by `schema-users-position.sql`, 2026-10-30) is the person's job position (e.g. "Physical Therapist", "Clinical Manager") — distinct from the system `role` and the free-text `title`; the dashboard offers a dropdown of common home-health positions but the column is plain TEXT |
 | Credentials (professional) | npi, taxonomy, specialty, physician_type, state_license_number, federaldrugid, federaltaxid |
 | Workplace | facility, facility_id (integer, no FK), organization |
-| Contact/address | street, city, state, zip, phone, phonecell, fax |
+| Contact/address | street, city, state, zip, phone, phonecell, fax; office_street, office_city, office_state, office_zip — the clinician's own OFFICE address (added by `schema-users-office.sql`, deploy-40), written self-service via `PUT /users/me/addresses` (Settings → Home & Office). The profile address block is the HOME address; the home/office pair are the Mileage day's bookends (home↔office legs are personal/commute miles), with the personal office preferred over the agency's address |
 | Other | info, notes |
 | Security | pin_hash — scrypt hash (`scrypt$<salt>$<key>`), NULL until a PIN is set; NEVER returned by the API |
 | System | created_at, updated_at (trigger-maintained) |
@@ -213,6 +219,12 @@ properties of the WHOLE report), `submitted_at`,
 `approved_by` (FK → users), `approved_at`, `paid_at`,
 `payment_ref`, `notes`, created_at / updated_at / deleted_at
 (soft delete; runtime user has no DELETE grant). 16 columns.
+Deploy-41 (`schema-expense-approvals.sql`) adds `model`
+(TEXT, `legacy` default / `chain`): pre-Deploy-27 rows are
+`legacy` and keep the original summary math; reports saved
+by the current flow are `chain` and total with the chain
+math. The status lifecycle is live again for chain reports
+via `POST /expense-reports/:id/transition`.
 
 ## mileage_entries
 
@@ -238,13 +250,18 @@ One row per non-mileage expense LINE inside a report
 2026-11-01 to the report model, deployed 2026-11-01 with
 deploy-18):
 id (BIGINT identity), `report_id` (BIGINT, FK →
-expense_reports.id, required — lines belong to a report),
-`user_id` (BIGINT, FK → users.id — the connection to staff
+expense_reports.id — required originally; deploy-41's
+`schema-expense-itemization.sql` drops the NOT NULL so
+day-flow lines exist unattached until a saved report links
+them), `user_id` (BIGINT, FK → users.id — the connection to staff
 is by id, never by name; the employee name shown in lists is
 read from `users` with a JOIN), `expense_date`, `category`
 (CHECK list of the twelve standard categories: mileage,
 parking, tolls, medical_supplies, office_supplies, meals,
-travel, lodging, phone_internet, training, licenses, other),
+travel, lodging, phone_internet, training, licenses, other —
+deploy-41 adds `supplies` additively for the itemization UI,
+whose categories are tolls / parking / meals / supplies /
+other),
 `description`, `vendor_name`, `amount_cents` (INTEGER ≥ 0 —
 money is integer cents, never floats), `currency` (default
 'USD'), `payment_method` (personal_card / company_card /
@@ -262,6 +279,33 @@ user ids, categories and negative amounts, the JOIN returns
 the right name even for two staff with identical names, and
 the expenses API suite passes end to end (42 checks incl.
 day math, lifecycle, PIN gates, cross-user isolation).
+
+## expense_receipts / mileage_rates / expense_settings / expense_report_events (deploy-41)
+
+Built locally 2026-11-06, not yet deployed. `expense_receipts`
+(`schema-expense-receipts.sql`): one row per uploaded receipt
+file — id, `mileage_entry_id` XOR `expense_id` (a CHECK
+enforces exactly one parent), `filename`, `mime_type`
+(jpeg / png / webp / pdf), `size_bytes`, `data` (BYTEA — the
+file bytes live in the database so the nightly backup covers
+them; never selected by list endpoints), uploaded_by,
+timestamps, deleted_at (soft delete; no DELETE grant).
+Uploads are capped at 8 MiB decoded and magic-byte verified.
+`mileage_rates` (`schema-mileage-rates.sql`): `rate`
+NUMERIC(6,4) ≥ 0, `effective_from`, `effective_to` (NULL =
+open-ended; recomputed transactionally on insert so ranges
+never overlap), created_by / created_at. History is
+append-only in practice: no update/delete endpoints.
+`expense_settings` (`schema-expense-policy.sql`): platform
+singleton (id = 1, CHECK-enforced) — `require_receipts`
+BOOLEAN, `receipt_threshold_cents` INTEGER NULL (= every
+line needs a receipt), updated_by / updated_at.
+`expense_report_events` (`schema-expense-approvals.sql`):
+the approval timeline — id, `report_id` (FK →
+expense_reports), `actor_user_id` (FK → users),
+`from_status` (NULL on the creation row), `to_status`,
+`note`, created_at. Append-only; rendered on the saved
+report oldest first.
 
 ## patient_merge_marks / patient_merges (deploy-28)
 

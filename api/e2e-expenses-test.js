@@ -9,8 +9,12 @@
 // (billable = business legs, personal = commute bookends,
 // dollars only from rated business legs) → cross-user
 // isolation with manager read access → owner-only writes →
-// legacy envelope reads still honoring the old math → the
-// retired lifecycle/write endpoints are gone.
+// legacy envelope reads still honoring the old math.
+// Deploy-41 (2026-11-06) restores POST /expense-reports and
+// the lifecycle transitions, so the old "retired endpoints
+// → 404" checks are replaced below by a REPORT_EMPTY create
+// check; full lifecycle coverage lives in
+// e2e-expense-upgrade-test.js.
 //
 // The routing LIB's response parser is unit-checked without
 // network; the live Valhalla call is environment-dependent
@@ -207,12 +211,8 @@ async function main() {
     check('legacy math: amount 1715¢', legacyGet.json.mileage_amount_cents === 1715, `got ${legacyGet.json.mileage_amount_cents}`);
     const legacyListOther = await call('GET', '/expense-reports', { as: 'other' });
     check("legacy list hides others' reports", legacyListOther.json.reports.every((r) => r.id !== legacyId));
-    const createGone = await call('POST', '/expense-reports', { body: { period_start: '2026-11-01', period_end: '2026-11-30' } });
-    check('POST /expense-reports retired → 404', createGone.res.status === 404, `got ${createGone.res.status}`);
-    const submitGone = await call('POST', `/expense-reports/${legacyId}/submit`, { body: {} });
-    check('submit retired → 404', submitGone.res.status === 404, `got ${submitGone.res.status}`);
-    const approveGone = await call('POST', `/expense-reports/${legacyId}/approve`, { as: 'mgr', body: {} });
-    check('approve retired → 404', approveGone.res.status === 404, `got ${approveGone.res.status}`);
+    const createEmpty = await call('POST', '/expense-reports', { body: { period_start: '2027-01-01', period_end: '2027-01-31' } });
+    check('POST /expense-reports empty range → 400 REPORT_EMPTY', createEmpty.res.status === 400 && createEmpty.json.code === 'REPORT_EMPTY', `got ${createEmpty.res.status} ${JSON.stringify(createEmpty.json)}`);
   } finally {
     server.close();
     await pool.end();

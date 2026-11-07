@@ -35,6 +35,17 @@ export function useMyStaff(user: User | null): ApiUser | null | undefined {
   return me;
 }
 
+// Replace the cached record with a fresh fetch — after a
+// self-service write (e.g. Settings -> Home & Office saving the
+// caller's addresses) so views mounted afterwards see the new
+// values without a sign-out. Already-mounted views keep the
+// record they loaded with.
+export function refreshMyStaff(user: User): Promise<ApiUser | null> {
+  const p = fetchMyStaffRecord(user).catch(() => null);
+  cache.set(user.uid, p);
+  return p;
+}
+
 // True when the staff record is an active manager or admin —
 // the two roles the API's role gates accept.
 export function isManagerRole(

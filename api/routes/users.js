@@ -3,6 +3,8 @@
 // Endpoints (mounted under /users by server.js, behind requireAuth):
 //   GET    /users            all staff (safe columns only)
 //   GET    /users/me         the signed-in user's own row, or null
+//   PUT    /users/me/addresses the caller's own home/office
+//                          addresses — SELF-SERVICE
 //   GET    /users/clinicians active users with authorized = true
 //                          (the assignable-provider list)
 //   POST   /users            create a staff member — ROLE-GATED
@@ -43,7 +45,9 @@ const SAFE_COLUMNS = `
   fname, mname, lname, suffix, title, position, valedictory,
   npi, taxonomy, specialty, physician_type, state_license_number,
   facility, facility_id, organization,
-  street, city, state, zip, phone, phonecell, fax,
+  street, city, state, zip,
+  office_street, office_city, office_state, office_zip,
+  phone, phonecell, fax,
   info, notes, (pin_hash IS NOT NULL) AS has_pin,
   created_at, updated_at
 `;
@@ -233,6 +237,87 @@ router.delete('/me/agencies/:agencyId', async (req, res, next) => {
 });
 
 // ------------------------------------------------------------------
+// My addresses: the clinician's own home + office addresses
+// (Settings -> Home & Office). Home rides the profile address
+// columns (street/city/state/zip); office has its own office_*
+// columns (schema-users-office.sql). The Mileage page uses the
+// pair as the day's bookends — home<->office legs are personal
+// (commute) miles. Self-service like /me/agencies: the update is
+// scoped to the caller's resolved staff row, so nobody can write
+// another clinician's addresses through this route.
+// ------------------------------------------------------------------
+
+const ADDRESS_FIELDS = [
+  'street',
+  'city',
+  'state',
+  'zip',
+  'office_street',
+  'office_city',
+  'office_state',
+  'office_zip',
+];
+
+router.put('/me/addresses', async (req, res, next) => {
+  try {
+    const staff = await resolveStaff(req);
+    if (!staff) {
+      return res.status(403).json({
+        error: 'no active staff record for this account',
+        code: 'NO_STAFF_RECORD',
+      });
+    }
+    const body = req.body ?? {};
+    const fields = {};
+    for (const key of ADDRESS_FIELDS) {
+      if (body[key] === undefined) continue;
+      const value = body[key];
+      if (value !== null && typeof value !== 'string') {
+        return res.status(400).json({
+          error: `${key} must be a string`,
+          code: 'VALIDATION',
+        });
+      }
+      // Trim; a blank string clears the field (stored NULL).
+      const trimmed = value === null ? null : value.trim();
+      fields[key] = trimmed === '' ? null : trimmed;
+    }
+    const keys = Object.keys(fields);
+    if (keys.length === 0) {
+      return res.status(400).json({
+        error: 'no address fields provided',
+        code: 'VALIDATION',
+      });
+    }
+    const sets = keys.map((key, i) => `${key} = $${i + 1}`);
+    const { rows } = await pool.query(
+      `UPDATE users SET ${sets.join(', ')}
+        WHERE id = $${keys.length + 1}
+        RETURNING ${SAFE_COLUMNS}`,
+      [...keys.map((k) => fields[k]), staff.id],
+    );
+    const row = rows[0];
+    // Logged like a staff user_update (admin_action) with the
+    // caller as their own actor: ids, email, and the NAMES of the
+    // fields touched — address values are never logged.
+    insertEvent(pool, {
+      actor: req.user,
+      event: 'admin_action',
+      details: {
+        action: 'user_update',
+        target_user_id: row.id,
+        target_email: row.email,
+        fields: keys,
+      },
+      ip: req.ip || null,
+    }).catch(() => {});
+    res.json(row);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ------------------------------------------------------------------
 // Staff writes (create / update / deactivate / restore), all gated
 // by the manager PIN. Mirrors the patients router's patterns:
 // whitelist, validate, one transaction per write, admin_action event
@@ -276,6 +361,10 @@ const WRITABLE = [
   'city',
   'state',
   'zip',
+  'office_street',
+  'office_city',
+  'office_state',
+  'office_zip',
   'phone',
   'phonecell',
   'fax',
