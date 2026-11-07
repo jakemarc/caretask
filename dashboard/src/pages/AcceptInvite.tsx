@@ -4,11 +4,15 @@ import {
   createUserWithEmailAndPassword,
   onAuthStateChanged,
   signInWithEmailAndPassword,
-  signInWithPopup,
   signOut,
   type User,
 } from "firebase/auth";
-import { auth, googleProvider, isFirebaseConfigured } from "../lib/firebase";
+import { auth, isFirebaseConfigured } from "../lib/firebase";
+import {
+  consumeGoogleRedirectResult,
+  googleAuthErrorMessage,
+  signInWithGoogle,
+} from "../lib/googleAuth";
 import { acceptInvite, type ApiRequestError } from "../lib/patientApi";
 import type { Theme } from "../lib/theme";
 import { Moon, Sun } from "lucide-react";
@@ -48,6 +52,9 @@ export default function AcceptInvite({
       setCurrentUser(null);
       return;
     }
+    void consumeGoogleRedirectResult(auth).catch((err) => {
+      setError(googleAuthErrorMessage(err) || friendlyError(err));
+    });
     return onAuthStateChanged(auth, setCurrentUser);
   }, []);
 
@@ -108,16 +115,21 @@ export default function AcceptInvite({
     if (!auth) return;
     setError("");
     setBusy(true);
+    let redirecting = false;
     try {
-      const cred = await signInWithPopup(auth, googleProvider);
-      await finishAccept(cred.user, {
-        fname: fname.trim(),
-        lname: lname.trim(),
-      });
+      const outcome = await signInWithGoogle(auth);
+      if (outcome.status === "signed-in") {
+        await finishAccept(outcome.credential.user, {
+          fname: fname.trim(),
+          lname: lname.trim(),
+        });
+      } else {
+        redirecting = true;
+      }
     } catch (err) {
-      setError(friendlyError(err));
+      setError(googleAuthErrorMessage(err) || friendlyError(err));
     } finally {
-      setBusy(false);
+      if (!redirecting) setBusy(false);
     }
   }
 
@@ -351,6 +363,8 @@ function friendlyError(err: unknown): string {
       return "This account is already on the team — just sign in.";
   }
   if (err instanceof Error) {
+    const googleMessage = googleAuthErrorMessage(err);
+    if (googleMessage) return googleMessage;
     const code = (err as { code?: string }).code ?? "";
     switch (code) {
       case "auth/email-already-in-use":

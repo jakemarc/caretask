@@ -10,11 +10,15 @@ import { useCallback, useEffect, useState } from "react";
 import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
-  signInWithPopup,
   signOut,
   type User,
 } from "firebase/auth";
-import { auth, googleProvider, isFirebaseConfigured } from "../lib/firebase";
+import { auth, isFirebaseConfigured } from "../lib/firebase";
+import {
+  consumeGoogleRedirectResult,
+  googleAuthErrorMessage,
+  signInWithGoogle,
+} from "../lib/googleAuth";
 import Mark from "../components/Mark";
 import {
   createInvite,
@@ -77,6 +81,13 @@ function AdminSignIn() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
+  useEffect(() => {
+    if (!auth) return;
+    void consumeGoogleRedirectResult(auth).catch((err) => {
+      setError(googleAuthErrorMessage(err) || "Google sign-in didn't complete.");
+    });
+  }, []);
+
   async function emailSignIn(e: React.FormEvent) {
     e.preventDefault();
     if (!auth) return;
@@ -95,12 +106,14 @@ function AdminSignIn() {
     if (!auth) return;
     setBusy(true);
     setError("");
+    let redirecting = false;
     try {
-      await signInWithPopup(auth, googleProvider);
-    } catch {
-      setError("Google sign-in didn't complete.");
+      const outcome = await signInWithGoogle(auth);
+      if (outcome.status === "redirecting") redirecting = true;
+    } catch (err) {
+      setError(googleAuthErrorMessage(err) || "Google sign-in didn't complete.");
     } finally {
-      setBusy(false);
+      if (!redirecting) setBusy(false);
     }
   }
 

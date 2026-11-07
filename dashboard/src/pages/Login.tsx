@@ -3,9 +3,13 @@ import { useNavigate } from "react-router-dom";
 import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
-  signInWithPopup,
 } from "firebase/auth";
-import { auth, googleProvider, isFirebaseConfigured } from "../lib/firebase";
+import { auth, isFirebaseConfigured } from "../lib/firebase";
+import {
+  consumeGoogleRedirectResult,
+  googleAuthErrorMessage,
+  signInWithGoogle,
+} from "../lib/googleAuth";
 import type { Theme } from "../lib/theme";
 import { Moon, Sun } from "lucide-react";
 import Mark from "../components/Mark";
@@ -32,6 +36,9 @@ export default function Login({
       setChecking(false);
       return;
     }
+    void consumeGoogleRedirectResult(auth).catch((err) => {
+      setError(googleAuthErrorMessage(err) || friendlyError(err));
+    });
     const unsub = onAuthStateChanged(auth, (user) => {
       if (user) navigate("/app", { replace: true });
       else setChecking(false);
@@ -60,13 +67,15 @@ export default function Login({
     if (!auth) return;
     setError("");
     setBusy(true);
+    let redirecting = false;
     try {
-      await signInWithPopup(auth, googleProvider);
-      navigate("/app");
+      const outcome = await signInWithGoogle(auth);
+      if (outcome.status === "signed-in") navigate("/app");
+      else redirecting = true;
     } catch (err) {
-      setError(friendlyError(err));
+      setError(googleAuthErrorMessage(err) || friendlyError(err));
     } finally {
-      setBusy(false);
+      if (!redirecting) setBusy(false);
     }
   }
 
@@ -162,6 +171,8 @@ export default function Login({
 
 function friendlyError(err: unknown): string {
   if (err instanceof Error) {
+    const googleMessage = googleAuthErrorMessage(err);
+    if (googleMessage) return googleMessage;
     const code = (err as { code?: string }).code ?? "";
     switch (code) {
       case "auth/invalid-credential":

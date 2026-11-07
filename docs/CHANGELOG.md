@@ -4,6 +4,28 @@ All notable shipped changes to the CareTask platform. Newest first.
 "Live" means deployed and verified at the listed URL; "Local" means
 built and verified but not deployed.
 
+## 2026-11-07
+
+- **Google sign-in fallback for blocked popups — deploy-44,
+  LIVE 2026-11-07.**
+  Jake reported Google sign-in blocked on a managed Android
+  tablet (not a CenterWell device). Source check: the Login,
+  invite-accept, and Admin sign-in screens all used Firebase
+  `signInWithPopup` only, which managed/Android/WebView
+  browsers often block. New shared `src/lib/googleAuth.ts`:
+  Android and WebView user agents go straight to Firebase
+  `signInWithRedirect`; desktop popup sign-in falls back to
+  redirect on popup-blocked, cancelled-popup, unsupported-
+  environment, and web-storage errors. Each sign-in surface
+  consumes `getRedirectResult` on load, and blocked Google
+  flows now get specific messages (browser blocked the
+  sign-in/storage, wrong address for Google sign-in, or use
+  email/password) instead of a generic failure. Applied to
+  `Login.tsx`, `AcceptInvite.tsx`, and `AdminApp.tsx`.
+  Deployment: canonical 5e24981d, bundle index-FEj25wZ1.js,
+  build stamp mw6c68nv-vg5grf; served-bundle marker and
+  /health verified. Dashboard-only.
+
 ## 2026-11-06
 
 - **Mileage 0.0-mile legs fix — deploy-43, LIVE
