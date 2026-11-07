@@ -6,6 +6,33 @@ built and verified but not deployed.
 
 ## 2026-11-06
 
+- **Mileage 0.0-mile legs fix — deploy-43, LIVE
+  2026-11-06.** Jake's
+  screenshot: two legs at 0.0 mi with no explanation.
+  Root cause in `ExpensesView`: a leg routes only when
+  BOTH endpoint stops carry coordinates, and nothing ever
+  geocoded a stop that had an address but no coordinates —
+  the patient stop's record has no coordinates on file,
+  and the Office bookend's one-time geocode came back
+  empty (the neighboring legs routed fine, proving the
+  other endpoints were located). Three fixes:
+  (1) coordinate healing — any stop with an address but no
+  coordinates is geocoded once per (stop, address) via the
+  shared Nominatim courtesy chain, the coordinates are
+  filled in, and the adjacent legs are invalidated so they
+  route; (2) saved-day load no longer stamps a leg's
+  routed signature unless routed figures actually came back
+  with it (an unrouted saved leg used to freeze at 0.0
+  forever, because the routing effect skips stamped legs);
+  (3) a leg that still cannot route now says
+  "Couldn't locate a stop on this leg — type the miles."
+  instead of sitting blank over the 0.0. Dashboard-only.
+  Deployment record: canonical deployment 71f646ce, bundle
+  index-Cahn0E2V.js, build stamp mw5olg22-g724tq, API URL +
+  fix markers verified in the served bundle, /health OK.
+  Jake's signed-in check: reopen the affected day — the
+  Hall and Office legs should populate; save the day to
+  persist the healed endpoints.
 - **Mileage locate-button fallback — deploy-42, LIVE
   2026-11-06.** Jake reported the Mileage stop editor's
   locate button only filled the closest patient home within

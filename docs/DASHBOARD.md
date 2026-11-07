@@ -736,6 +736,18 @@ restrictions, not by secrecy).
   if no address resolves at any zoom, nothing is inserted,
   no error shows, and a neutral hint offers typing the
   address instead (typing always remains available).
+  **Deploy-43 (LIVE 2026-11-06)** — coordinate healing: a
+  stop with an address but no coordinates (a patient record
+  that has none on file, a bookend whose one-time geocode
+  came back empty) is geocoded on day load via the shared
+  Nominatim courtesy chain — once per (stop, address) per
+  session — its coordinates are filled in and its adjacent
+  legs invalidated so they route (the day goes dirty, so
+  saving persists the healed endpoints). Saved legs stamp
+  their routed signature only when routed figures exist,
+  so a saved-but-unrouted leg re-routes on load instead of
+  freezing at 0.0; a leg that still cannot route says
+  "Couldn't locate a stop on this leg — type the miles."
 
 ## Duplicate review + mark-as-duplicate (Live 2026-11-02, deploy-28)
 

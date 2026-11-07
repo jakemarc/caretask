@@ -780,8 +780,16 @@ export default function ExpensesView({
             appointment_id: e.appointment_id ? String(e.appointment_id) : null,
             saved_id: e.id,
             receipt_count: e.receipt_count ?? 0,
+            // Stamp the signature ONLY when routed figures
+            // actually came back with the leg — a saved leg
+            // whose endpoints have coordinates but whose
+            // figures are null never really routed, and
+            // stamping it would freeze it at 0.0 forever
+            // (the routing effect skips stamped legs).
             routed_sig:
-              e.start_lat !== null && e.end_lat !== null
+              e.start_lat !== null &&
+              e.end_lat !== null &&
+              (e.miles_toll !== null || e.miles_no_toll !== null)
                 ? `${e.start_lat},${e.start_lng}->${e.end_lat},${e.end_lng}`
                 : "",
             routing: false,
@@ -1013,6 +1021,55 @@ export default function ExpensesView({
         });
     });
   }, [stops, legs, dayLoaded, user]);
+
+  // ---------- coordinate healing ----------
+  // A stop with an address but no coordinates silently
+  // leaves every leg touching it unrouted at 0.0 miles —
+  // the routing effect above skips it and nothing says why
+  // (Jake's report, 2026-11-06: a patient whose record has
+  // no coordinates on file, and an Office bookend whose
+  // one-time geocode came back empty). Geocode such a stop
+  // once per (stop, address) and fill the coordinates in;
+  // filling them invalidates the adjacent legs exactly the
+  // way an address edit does, so the routing effect routes
+  // them. A failed geocode is remembered for the session —
+  // the leg note then explains the 0.0 instead of hiding it.
+  const geoAttempted = useRef(new Set<string>());
+  useEffect(() => {
+    if (!dayLoaded) return;
+    stops.forEach((s, i) => {
+      if (!s.address || (s.lat !== null && s.lng !== null)) return;
+      const attemptKey = `${s.key}|${s.address}`;
+      if (geoAttempted.current.has(attemptKey)) return;
+      geoAttempted.current.add(attemptKey);
+      geocodeFreeText(s.address).then((geo) => {
+        if (!geo) return;
+        setStops((prev) =>
+          prev.map((p) =>
+            p.key === s.key && p.address === s.address && p.lat === null
+              ? { ...p, lat: geo.lat, lng: geo.lon }
+              : p,
+          ),
+        );
+        setLegs((prevLegs) =>
+          prevLegs.map((l, j) =>
+            j === i - 1 || j === i
+              ? {
+                  ...l,
+                  miles: "",
+                  miles_toll: null,
+                  miles_no_toll: null,
+                  routed_sig: "",
+                  routing: false,
+                  route_failed: false,
+                }
+              : l,
+          ),
+        );
+        setDirty(true);
+      });
+    });
+  }, [stops, dayLoaded]);
 
   // ---------- chain editing ----------
 
@@ -1711,7 +1768,12 @@ export default function ExpensesView({
                                     : legIn.miles_toll !== null ||
                                         legIn.miles_no_toll !== null
                                       ? `Tollway ${legIn.miles_toll ?? "—"} · Back roads ${legIn.miles_no_toll ?? "—"}`
-                                      : ""}
+                                      : stops[i - 1]?.lat === null ||
+                                          stops[i - 1]?.lng === null ||
+                                          stop.lat === null ||
+                                          stop.lng === null
+                                        ? "Couldn't locate a stop on this leg — type the miles."
+                                        : ""}
                               </span>
                               <button
                                 type="button"
@@ -1858,6 +1920,12 @@ export default function ExpensesView({
                   leg={legs[i]}
                   user={user}
                   kind={legKind(stop, next, legs[i].kind_override)}
+                  unlocated={
+                    stop.lat === null ||
+                    stop.lng === null ||
+                    next.lat === null ||
+                    next.lng === null
+                  }
                   onToggle={(t) => toggleTollway(i, t)}
                   onMilesCommit={(v) => updateLeg(i, { miles: String(v) })}
                   onKind={(k) => updateLeg(i, { kind_override: k })}
@@ -2738,6 +2806,7 @@ function LegRow({
   leg,
   user,
   kind,
+  unlocated,
   onToggle,
   onMilesCommit,
   onKind,
@@ -2746,6 +2815,10 @@ function LegRow({
   leg: LegState;
   user: User;
   kind: "business" | "commute";
+  // True when either endpoint stop has no coordinates, so
+  // the leg cannot route — the note says so instead of
+  // sitting blank over a 0.0.
+  unlocated?: boolean;
   onToggle: (tollway: boolean) => void;
   onMilesCommit: (v: number) => void;
   onKind: (k: "business" | "commute") => void;
@@ -2780,7 +2853,9 @@ function LegRow({
             ? "Routing unavailable — type the miles."
             : leg.miles_toll !== null || leg.miles_no_toll !== null
               ? `Tollway ${leg.miles_toll ?? "—"} · Back roads ${leg.miles_no_toll ?? "—"}`
-              : ""}
+              : unlocated
+                ? "Couldn't locate a stop on this leg — type the miles."
+                : ""}
       </span>
       <button
         type="button"
